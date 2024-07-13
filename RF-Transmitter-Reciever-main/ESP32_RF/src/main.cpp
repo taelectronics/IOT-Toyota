@@ -93,7 +93,12 @@ void setup() {
   pinMode(RS485_TX_ENABLE, OUTPUT);
   // Initialize Modbus communication
   node.begin(SLAVE_ID, SerialModbus);
-
+  Serial.println(FirmwareVer);
+  pinMode(23,INPUT_PULLUP);
+  if(digitalRead(23) == LOW)
+  {
+    firmwareUpdate();
+  }
 }
 
 void loop()
