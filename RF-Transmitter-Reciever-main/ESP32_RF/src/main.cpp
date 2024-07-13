@@ -4,6 +4,15 @@
 #include <FirebaseESP32.h>
 #include <ModbusMaster.h>
 #include <HardwareSerial.h>
+#include <HTTPClient.h>
+#include <HTTPUpdate.h>
+#include <WiFiClientSecure.h>
+#include <cert.h>
+
+String FirmwareVer = {
+  "24.7.13.8.5"
+};
+#define URL_fw_Bin "https://raw.githubusercontent.com/programmer131/ESP8266_ESP32_SelfUpdate/master/esp32_ota/fw.bin"
 
 #define NUMBER_TIMES 10
 // Define the UART port and pins
@@ -44,6 +53,7 @@ String stationPath = "/Station/Status";
 String convertStatusArrayToString(byte arr[20]);
 String convertTimeArrayToString(uint16_t TimeOn[], uint16_t TimeOff[], int size);
 bool readRegisters(uint16_t startReg, uint16_t count, uint16_t* values);
+void firmwareUpdate();
 void setup() {
   Serial.begin(115200);
 
@@ -210,5 +220,24 @@ bool readRegisters(uint16_t startReg, uint16_t count, uint16_t* values)
     return true;
   } else {
     return false;
+  }
+}
+void firmwareUpdate(void) {
+  WiFiClientSecure client;
+  client.setCACert(rootCACertificate);
+  t_httpUpdate_return ret = httpUpdate.update(client, URL_fw_Bin);
+
+  switch (ret) {
+  case HTTP_UPDATE_FAILED:
+    Serial.printf("HTTP_UPDATE_FAILD Error (%d): %s\n", httpUpdate.getLastError(), httpUpdate.getLastErrorString().c_str());
+    break;
+
+  case HTTP_UPDATE_NO_UPDATES:
+    Serial.println("HTTP_UPDATE_NO_UPDATES");
+    break;
+
+  case HTTP_UPDATE_OK:
+    Serial.println("HTTP_UPDATE_OK");
+    break;
   }
 }
