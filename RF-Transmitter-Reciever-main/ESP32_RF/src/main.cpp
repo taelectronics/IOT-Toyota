@@ -9,10 +9,10 @@
 #include <WiFiClientSecure.h>
 #include <cert.h>
 
-String FirmwareVer = {
-  "24.7.13.8.5"
-};
-#define URL_fw_Bin "https://raw.githubusercontent.com/programmer131/ESP8266_ESP32_SelfUpdate/master/esp32_ota/fw.bin"
+String FirmwareVer = "24.7.13.10.08";
+// #define URL_fw_Bin "https://raw.githubusercontent.com/taelectronics/IOT-Toyota/main/RF-Transmitter-Reciever-main/ESP32_RF/ImageFile/firmware.bin"
+#define URL_fw_Bin "https://raw.githubusercontent.com/taelectronics/IOT-Toyota/main/RF-Transmitter-Reciever-main/ESP32_RF/ImageFile/firmware.bin"
+// #define URL_fw_Bin "https://drive.google.com/file/d/1xcb9-MSbB6aBla6BNksWki6kdzftNVYl/view?usp=sharing/firmware.bin"
 
 #define NUMBER_TIMES 10
 // Define the UART port and pins
@@ -88,14 +88,14 @@ void setup() {
   }
   Serial.println("Transmitter: rf_driver initialised");
 
-    // Initialize UART for Modbus communication
+  // Initialize UART for Modbus communication
   SerialModbus.begin(9600, SERIAL_8N1, RS485_RXD2, RS485_TXD2);
   pinMode(RS485_TX_ENABLE, OUTPUT);
   // Initialize Modbus communication
   node.begin(SLAVE_ID, SerialModbus);
   Serial.println(FirmwareVer);
-  pinMode(23,INPUT_PULLUP);
-  if(digitalRead(23) == LOW)
+  pinMode(23, INPUT_PULLUP);
+  if (digitalRead(23) == LOW)
   {
     firmwareUpdate();
   }
@@ -103,22 +103,21 @@ void setup() {
 
 void loop()
 {
-  
   String data_Firebase;
   for (int i = 1; i < 20; i++)
   {
     RetryModbus = 0;
     while (RetryModbus <= 3)
     {
-      if(true == readRegisters(REG_START_ON + i*10, NUMBER_TIMES, TimeOn))
+      if (true == readRegisters(REG_START_ON + i * 10, NUMBER_TIMES, TimeOn))
       {
         RetryModbus = 0;
-        if(true == readRegisters(REG_START_OFF + i*10, NUMBER_TIMES, TimeOff))
+        if (true == readRegisters(REG_START_OFF + i * 10, NUMBER_TIMES, TimeOff))
         {
           String data_time = convertTimeArrayToString(TimeOn, TimeOff, 10);
           Serial.println(data_time);
           delay(2000);
-          data_Firebase += "@" + StationName[i] + ":" + data_time ;
+          data_Firebase += "@" + StationName[i] + ":" + data_time;
           RetryModbus = 0;
           break;
         }
@@ -131,34 +130,31 @@ void loop()
       {
         RetryModbus++;
       }
-      if(RetryModbus > 3)
+      if (RetryModbus > 3)
       {
         break;
       }
     }
 
-    delay(100); 
+    delay(100);
   }
 
-    
-  data_Firebase +="@";
-
+  data_Firebase += "@";
 
   RetryFirebase = 0;
-  if(RetryModbus == 0)
+  if (RetryModbus == 0)
   {
-    while(RetryFirebase < 3)
+    while (RetryFirebase < 3)
     {
-      if (Firebase.ready()) 
+      if (Firebase.ready())
       {
-
         // Serial.println(data_Firebase);
         if (Firebase.setString(firebaseData, stationPath.c_str(), data_Firebase.c_str()))
         {
           Serial.println("Data for " + stationPath + " written successfully");
           break;
-        } 
-        else 
+        }
+        else
         {
           RetryFirebase++;
           Serial.println("Failed to write data for " + stationPath);
@@ -168,12 +164,11 @@ void loop()
       }
       else
       {
-        Serial.println("Firbase is not ready");
+        Serial.println("Firebase is not ready");
         RetryFirebase++;
       }
     }
   }
-  
 
   String data_transmit = convertStatusArrayToString(Status);
   Serial.println("Data to transmit: " + data_transmit);
@@ -227,7 +222,10 @@ bool readRegisters(uint16_t startReg, uint16_t count, uint16_t* values)
     return false;
   }
 }
-void firmwareUpdate(void) {
+
+void firmwareUpdate(void) 
+{
+
   WiFiClientSecure client;
   client.setCACert(rootCACertificate);
   t_httpUpdate_return ret = httpUpdate.update(client, URL_fw_Bin);
@@ -245,4 +243,5 @@ void firmwareUpdate(void) {
     Serial.println("HTTP_UPDATE_OK");
     break;
   }
+
 }
