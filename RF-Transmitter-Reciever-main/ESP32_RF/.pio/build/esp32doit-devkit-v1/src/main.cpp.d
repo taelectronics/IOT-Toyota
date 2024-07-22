@@ -328,4 +328,6 @@
  C:/Users/tuana/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/mbedtls/mbedtls/include/mbedtls/error.h \
  C:/Users/tuana/.platformio/packages/framework-arduinoespressif32/libraries/HTTPUpdate/src/HTTPUpdate.h \
  C:/Users/tuana/.platformio/packages/framework-arduinoespressif32/libraries/WiFi/src/WiFiUdp.h \
- lib/cert/cert.h
+ lib/cert/cert.h lib/NTPClient-master/NTPClient.h \
+ C:/Users/tuana/.platformio/packages/framework-arduinoespressif32/libraries/Preferences/src/Preferences.h \
+ lib/LiquidCrystal/src/LiquidCrystal.h
