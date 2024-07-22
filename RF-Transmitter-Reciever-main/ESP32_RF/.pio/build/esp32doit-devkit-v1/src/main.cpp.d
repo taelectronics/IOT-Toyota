@@ -330,4 +330,5 @@
  C:/Users/tuana/.platformio/packages/framework-arduinoespressif32/libraries/WiFi/src/WiFiUdp.h \
  lib/cert/cert.h lib/NTPClient-master/NTPClient.h \
  C:/Users/tuana/.platformio/packages/framework-arduinoespressif32/libraries/Preferences/src/Preferences.h \
- lib/LiquidCrystal/src/LiquidCrystal.h
+ lib/LiquidCrystal/src/LiquidCrystal.h \
+ C:/Users/tuana/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/esp_system/include/esp_task_wdt.h

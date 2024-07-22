@@ -331,4 +331,5 @@
  lib/RTClib-master/src/RTClib.h \
  lib/Adafruit_BusIO-master/Adafruit_I2CDevice.h \
  C:/Users/tuana/.platformio/packages/framework-arduinoespressif32/libraries/Preferences/src/Preferences.h \
- lib/LiquidCrystal/src/LiquidCrystal.h
+ lib/LiquidCrystal/src/LiquidCrystal.h \
+ C:/Users/tuana/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/esp_system/include/esp_task_wdt.h

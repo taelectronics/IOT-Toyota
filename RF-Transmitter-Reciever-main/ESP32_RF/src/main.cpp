@@ -13,10 +13,14 @@
 #include <LiquidCrystal.h>
 #include "time.h"
 #include <SPI.h>
+#include "esp_task_wdt.h"
 // Thông tin máy chủ NTP
 const char* ntpServer = "pool.ntp.org";
 const long  gmtOffset_sec = 7 * 3600; // GMT+7 (Giờ Việt Nam)
 const int   daylightOffset_sec = 0;
+
+// Thời gian chờ của watchdog (giây)
+#define WATCHDOG_TIMEOUT_S 300
 
 // Khởi tạo đối tượng WiFiUDP để giao tiếp với NTP
 WiFiUDP ntpUDP;
@@ -187,6 +191,10 @@ void setup() {
   // Cấu hình máy chủ NTP
   configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
   delay(1000);
+
+  // Khởi tạo watchdog
+  esp_task_wdt_init(WATCHDOG_TIMEOUT_S, true);
+
 }
 int count;
 void loop()
@@ -195,6 +203,7 @@ void loop()
   {
     printLocalTime();
   }
+  esp_task_wdt_reset();
   SettingbySoftware();
   if(count > 9) count =1;
   screen1();
@@ -206,6 +215,7 @@ void loop()
       TimeCompare[RowIndex][ColIndex] = TimeProcessed[RowIndex][ColIndex];
     }
   }
+  esp_task_wdt_reset();
   if(false == ReadTimeFromHMI())
   {
     printLocalTime();
@@ -215,6 +225,7 @@ void loop()
     
     if (true == readRegisters(i*40, 40, TimeGet))
     {
+      esp_task_wdt_reset();
       reduceArray(TimeGet, TimeProcessed[i], 40);
       delay(50);
       Status[i] = 0;
@@ -247,6 +258,7 @@ for( int Num = 1; Num < 20; Num++)
   
   if((Firebase_Primary_Set[Num] == E_NOT_OK))
   { 
+    esp_task_wdt_reset();
     // Lựa chọn sử dụng DataBase Primary
     if (Firebase.ready())
     {
@@ -285,6 +297,7 @@ for( int Num = 1; Num < 20; Num++)
 {
   if((Firebase_Backup_Set[Num] == E_NOT_OK))
   {
+    esp_task_wdt_reset();
     sendRF();
     if (Firebase.ready())
     {
@@ -317,10 +330,8 @@ for( int Num = 1; Num < 20; Num++)
     }
   delay(1000);
   } 
-  
 }
-
-  delay(1000);
+  delay(100);
 }
 
 String convertStatusArrayToString(byte arr[], int inputSize) {
@@ -363,10 +374,13 @@ bool ReadTimeFromHMI()
   minGet = (int)HMITime[0];
   return result;
 }
+
 void firmwareUpdate(void) 
 {
   Serial.println("Start to Update");
-  
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("Start to Update");
   WiFiClientSecure client;
   client.setCACert(rootCACertificate);
   
@@ -374,24 +388,34 @@ void firmwareUpdate(void)
 
   switch (ret) {
     case HTTP_UPDATE_FAILED:
+      lcd.clear();
+      lcd.setCursor(0,0);
+      lcd.print("Update fail");
+      delay(2000);
       Serial.printf("HTTP_UPDATE_FAILD Error (%d): %s\n", httpUpdate.getLastError(), httpUpdate.getLastErrorString().c_str());
       break;
 
     case HTTP_UPDATE_NO_UPDATES:
+      lcd.clear();
+      lcd.setCursor(0,0);
+      lcd.print("No Update");
+      delay(2000);
       Serial.println("HTTP_UPDATE_NO_UPDATES");
       break;
 
     case HTTP_UPDATE_OK:
+      lcd.clear();
+      lcd.setCursor(0,0);
+      lcd.print("Update");
+      lcd.setCursor(0,1);
+      lcd.print("Successfully");
+      delay(2000);
       Serial.println("HTTP_UPDATE_OK");
       Serial.println("Update Successfully");
-      delay(1000); // Đợi 1 giây trước khi reset
       ESP.restart(); // Reset ESP32
       break;
   }
 }
-
-
-
 
 int FirmwareVersionCheck(void) {
   String payload;
