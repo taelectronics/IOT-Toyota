@@ -75,11 +75,13 @@ FirebaseConfig firebaseConfigBackup;
 String wifi_ssid = "CKA Automation";
 String wifi_password = "cka12345";
 byte WifiStatus;
+int TimeSendRF;
 // Example arrays
 byte StationValue;
 byte Firebase_Backup_Status = E_NOT_OK;
 byte Firebase_Primary_Status = E_NOT_OK;
-int hourGet = 0, minGet = 0;
+byte SetTimeHMI = E_NOT_OK;
+int hourGet = 0, minGet = 0 , secGet = 0;
 uint16_t HMITime[2];
 uint16_t timeValue;
 uint16_t TimeGet[40] = {};
@@ -87,7 +89,7 @@ uint16_t TimeProcessed[20][20];
 uint16_t TimeCompare[20][20];
 String StationName[20] = {"/S00", "/S01", "/S02", "/S03", "/S04", "/S05", "/S06", "/S07", "/S08", "/S09", "/S10", "/S11", "/S12", "/S13", "/S14", "/S15", "/S16", "/S17", "/S18", "/S19"};
 String FirmwareVer = "24.7.13.10.38";
-byte Status[20] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+byte Status[20] = {0x0F, 0x0F, 0x0F, 0x0F,0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F};
 byte Firebase_Primary_Set[20] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
 byte Firebase_Backup_Set[20] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
 RH_ASK rf_driver(2000, 21, 19);
@@ -124,40 +126,28 @@ void setup() {
   lcd.clear();
   lcd.clearWriteError();
   lcd.setCursor(0, 0);
-  lcd.print("Ver: ");lcd.print(FirmwareVer);
+  lcd.print("V:");lcd.print(FirmwareVer);
   lcd.setCursor(0, 1);
   lcd.print("Wifi: "); lcd.print(wifi_ssid);
   delay(1000);
-  ConnectToWifi(100);
-  if (WiFi.status() != WL_CONNECTED)
-  {
-    lcd.clear();
-    lcd.setCursor(0,0);
-    lcd.print("WF isn't Connect");
-    delay(2000);
-  }
-  else
-  {
-    WifiStatus = E_OK;
-  }
   // Đọc chuỗi từ ROM và hiển thị lên Serial
   ReadFromRom();
   // Cấu hình Firebase
   firebaseConfigPrimary.host = FIREBASE_HOST_PRIMARY;
   firebaseConfigPrimary.signer.tokens.legacy_token = FIREBASE_AUTH_PRIMARY;
-  firebaseConfigPrimary.timeout.serverResponse = 10 * 1000;
+  firebaseConfigPrimary.timeout.serverResponse = 5 * 1000;
 
   // // Cấu hình Firebase Backup
   firebaseConfigBackup.host = FIREBASE_HOST_BACKUP;
   firebaseConfigBackup.signer.tokens.legacy_token = FIREBASE_AUTH_BACKUP;
-  firebaseConfigBackup.timeout.serverResponse = 10 * 1000;
-
-  // Kết nối Firebase
-  Firebase.begin(&firebaseConfigPrimary, &firebaseAuthPrimary);
-  Firebase.reconnectWiFi(true);
+  firebaseConfigBackup.timeout.serverResponse = 5 * 1000;
 
   // Kết nối Firebase
   Firebase.begin(&firebaseConfigBackup, &firebaseAuthBackup);
+  Firebase.reconnectWiFi(true);
+
+  // Kết nối Firebase
+  Firebase.begin(&firebaseConfigPrimary, &firebaseAuthPrimary);
   Firebase.reconnectWiFi(true);
 
   if (Firebase.ready()) 
@@ -181,17 +171,14 @@ void setup() {
   node.preTransmission(preTransmission);
   node.postTransmission(postTransmission);
   Serial.println(FirmwareVer);
-
+    // Cấu hình máy chủ NTP
+  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
   if (FirmwareVersionCheck()) 
   {
     firmwareUpdate();
   }
   pinMode(SELECT_FIREBASE_PRIMARY, INPUT_PULLUP);
   pinMode(SELECT_FIREBASE_BACKUP,INPUT_PULLUP);
-  // Cấu hình máy chủ NTP
-  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
-  delay(1000);
-
   // Khởi tạo watchdog
   esp_task_wdt_init(WATCHDOG_TIMEOUT_S, true);
 
@@ -199,15 +186,13 @@ void setup() {
 int count;
 void loop()
 {
-  if(false == ReadTimeFromHMI())
+  if((false == ReadTimeFromHMI())||(SetTimeHMI == E_NOT_OK))
   {
     printLocalTime();
   }
   esp_task_wdt_reset();
   SettingbySoftware();
-  if(count > 9) count =1;
   screen1();
-  Status[0] = count;
   for(int RowIndex = 0; RowIndex < 20; RowIndex++)
   {
     for(int ColIndex = 0; ColIndex <20; ColIndex++)
@@ -216,31 +201,15 @@ void loop()
     }
   }
   esp_task_wdt_reset();
-  if(false == ReadTimeFromHMI())
-  {
-    printLocalTime();
-  }
   for (uint16_t i = 1; i < 20; i++)
   {
-    
-    if (true == readRegisters(i*40, 40, TimeGet))
+    if (true == readRegisters(1000+i*40, 40, TimeGet))
     {
       esp_task_wdt_reset();
       reduceArray(TimeGet, TimeProcessed[i], 40);
-      delay(50);
-      Status[i] = 0;
-      // Serial.println(timeValue);
-      if(true == checkTimeRange(TimeProcessed[i], 20, timeValue)) 
-      {
-        Status[i] |= 1;
-      }
-    }
-    else
-    {
-      Status[i] |= 0x02;
+      delay(10);
     }
   }
-  sendRF();
   for(int RowIndex = 1; RowIndex < 20; RowIndex++)
   {
     for(int ColIndex = 0; ColIndex <20; ColIndex++)
@@ -255,13 +224,22 @@ void loop()
   }
 for( int Num = 1; Num < 20; Num++)
 {
-  
+  if((Firebase_Primary_Set[Num] == E_NOT_OK))
+  {
+      Firebase.begin(&firebaseConfigPrimary, &firebaseAuthPrimary);
+      break;
+  }
+}
+
+for( int Num = 1; Num < 20; Num++)
+{
   if((Firebase_Primary_Set[Num] == E_NOT_OK))
   { 
     esp_task_wdt_reset();
     // Lựa chọn sử dụng DataBase Primary
     if (Firebase.ready())
     {
+
       data_Firebase = arrayToString(TimeProcessed[Num], 20);
       Serial.println(data_Firebase);
       if (Firebase.setString(firebaseDataPrimary, stationPath.c_str() + StationName[Num], data_Firebase.c_str()))
@@ -275,6 +253,7 @@ for( int Num = 1; Num < 20; Num++)
         Serial.println("Failed to Write Primary Firebase: "); Serial.println(Num);
         Serial.println(firebaseDataPrimary.errorReason());
       }
+      TimeSendRF = 5;
       WifiStatus = E_OK;
     }
     else
@@ -291,14 +270,18 @@ for( int Num = 1; Num < 20; Num++)
   delay(1000);
   }
 }
-
+for( int Num = 1; Num < 20; Num++)
+{
+  if((Firebase_Backup_Set[Num] == E_NOT_OK))
+  Firebase.begin(&firebaseConfigBackup, &firebaseAuthBackup);
+  break;
+}
   // Lựa chọn sử dụng DataBase Backup
 for( int Num = 1; Num < 20; Num++)
 {
   if((Firebase_Backup_Set[Num] == E_NOT_OK))
   {
     esp_task_wdt_reset();
-    sendRF();
     if (Firebase.ready())
     {
       data_Firebase = arrayToString(TimeProcessed[Num], 20);
@@ -315,6 +298,7 @@ for( int Num = 1; Num < 20; Num++)
         Serial.print("Failed to Write Backup Firebase: "); Serial.println(Num);
         Serial.println(firebaseDataBackup.errorReason());
       }
+      TimeSendRF = 5;
       WifiStatus = E_OK;
     }
     else
@@ -331,7 +315,13 @@ for( int Num = 1; Num < 20; Num++)
   delay(1000);
   } 
 }
-  delay(100);
+if(TimeSendRF > 0)
+{
+  sendRF();
+  TimeSendRF--;
+  delay(1000);
+}
+
 }
 
 String convertStatusArrayToString(byte arr[], int inputSize) {
@@ -363,15 +353,16 @@ bool readRegisters(uint16_t startReg, uint16_t count, uint16_t* values)
 bool ReadTimeFromHMI()
 {
   bool result;
-  result = readRegisters(9018, 2, HMITime);
+  result = readRegisters(9017, 3, HMITime);
   if(result == true)
   {
-    timeValue = HMITime[1]*60 + HMITime[0];
-    Serial.print("Time HMI: "); Serial.print(HMITime[1]); Serial.print(":"); Serial.println(HMITime[0]);
+    timeValue = HMITime[2]*60 + HMITime[1];
+    Serial.print("Time HMI: "); Serial.print(HMITime[2]); Serial.print(":"); Serial.println(HMITime[1]);
     Serial.println(timeValue);
   }
-  hourGet = (int)HMITime[1];
-  minGet = (int)HMITime[0];
+  hourGet = (int)HMITime[2];
+  minGet = (int)HMITime[1];
+  secGet = (int)HMITime[0];
   return result;
 }
 
@@ -583,6 +574,7 @@ void SettingbySoftware()
       {
         // Ghi chuỗi vào ROM
         writeStringToROM(receivedString);
+        delay(1000);
         // Đọc chuỗi từ ROM và hiển thị lên Serial
         if(compareStrings(receivedString,readStringFromROM()))
         {
@@ -642,6 +634,7 @@ boolean ConnectToWifi(byte retry)
     Serial.println(wifi_password);
     for(int i=0; i<retry;i++)
     {
+      SettingbySoftware();
       if (WiFi.status() == WL_CONNECTED)
       {
         Serial.println("Connecting is successfully");
@@ -663,7 +656,27 @@ void printLocalTime()
   }
   hourGet = timeinfo.tm_hour;
   minGet = timeinfo.tm_min;
+  secGet = timeinfo.tm_sec;
   timeValue = timeinfo.tm_hour*60 + timeinfo.tm_min;
+  if(SetTimeHMI == E_NOT_OK)
+  {
+    uint16_t startAddress = 9017;
+    // Ghi dữ liệu vào buffer truyền
+    node.setTransmitBuffer(0, secGet); // Giá trị 0x1234 vào thanh ghi đầu tiên
+    node.setTransmitBuffer(1, minGet); // Giá trị 0x5678 vào thanh ghi thứ hai
+    node.setTransmitBuffer(2, hourGet); // Giá trị 0x9ABC vào thanh ghi thứ ba
+    uint8_t result = node.writeMultipleRegisters(startAddress, 3);
+      // Kiểm tra kết quả
+    if (result == node.ku8MBSuccess) {
+      Serial.println("Ghi thành công thời gian vào HMI!");
+      SetTimeHMI = E_OK;
+    } else {
+      Serial.print("Lỗi: ");
+      Serial.println(result, HEX);
+    }
+  }
+  
+
 }
 
 void preTransmission() 
@@ -719,22 +732,22 @@ void sendRF()
 
 void screen1()
 {
-  lcd.clear();
   lcd.setCursor(0,0);
   lcd.print("RF:");
-  lcd.print(count);
-  lcd.setCursor(6,0);
+  lcd.print(TimeSendRF);
+  lcd.print(" ");
   lcd.print(hourGet);lcd.print(":");
-  lcd.print(minGet);lcd.print(" ");
+  lcd.print(minGet);lcd.print(":");
+  lcd.print(secGet);lcd.print("     ");
   lcd.setCursor(0,1);
   lcd.print("W:");
   if(WifiStatus == E_OK)
   {
-    lcd.print("OK ");
+    lcd.print("1 ");
   }
   else
   {
-    lcd.print("E ");
+    lcd.print("0 ");
   }
   Firebase_Primary_Status = E_OK;
   Firebase_Backup_Status = E_OK;
@@ -750,25 +763,26 @@ void screen1()
       Firebase_Backup_Status = E_NOT_OK;
     }
   }
-  lcd.print("F0:");
+  lcd.print("P:");
   if(Firebase_Primary_Status == E_OK)
   {
-    lcd.print("OK ");
+    lcd.print("1 ");
   }
   else
   {
-    lcd.print("E ");
+    lcd.print("0 ");
   }
     
-  lcd.print("F1:");
+  lcd.print("B:");
   if(Firebase_Backup_Status == E_OK)
   {
-    lcd.print("OK ");
+    lcd.print("1 ");
   }
   else
   {
-    lcd.print("E ");
+    lcd.print("0 ");
   }
+  lcd.print("     ");
 }
 
 void ReadFromRom()
@@ -784,7 +798,7 @@ void ReadFromRom()
     {
       lcd.clear();
       lcd.setCursor(0, 0);
-      lcd.print("Backup Wifi:");
+      lcd.print("Wifi:");
       wifi_ssid = getStringBetween(ROMData, "*", 2);
       Serial.print("Wifi: "); Serial.println(wifi_ssid);
       wifi_password = getStringBetween(ROMData, "*", 3);

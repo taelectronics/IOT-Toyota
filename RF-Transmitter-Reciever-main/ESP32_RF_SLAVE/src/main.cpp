@@ -13,6 +13,11 @@
 #include <LiquidCrystal.h>
 #include "time.h"
 #include "esp_task_wdt.h"
+
+// Chân GPIO để sử dụng cho ngắt ngoài
+const int RFinterruptPin = 13;
+// Biến để đếm số lần ngắt
+volatile int RFinterrupt = 0;
 // Khởi tạo đối tượng RTC_DS1307
 RTC_DS1307 rtc;
 #define SDA_PIN 17   // Chân SDA tùy chỉnh
@@ -32,6 +37,7 @@ const int   daylightOffset_sec = 0;
 
 //Khởi tạo với các chân LCD
 LiquidCrystal lcd(14, 27, 26, 25, 33, 32);
+int lcdpin[6] = {4, 27, 26, 25, 33, 32};
 
 Preferences preferences;
 
@@ -50,10 +56,10 @@ Preferences preferences;
 #define OUTPUT1 19
 #define OUTPUT2 23
 #define SETBUTTTON 16
-#define UPBUTTON 17
-#define DOWNBUTTON 18
-#define SELECT_FIREBASE 34
-#define SELECT_RTC 35
+#define UPBUTTON 21
+#define DOWNBUTTON 22
+#define SELECT_FIREBASE 12
+#define SELECT_RTC 4
 
 // Khởi tạo Firebase
 FirebaseData firebaseDataPrimary;
@@ -78,7 +84,6 @@ uint8_t Status[20] = {0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 uint8_t Status_Firebase[20] = {0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 int hourSetRTC, minSetRTC, secSetRTC, daySetRTC, monthSetRTC, yearSetRTC;
 uint16_t TimeGet[40];
-RH_ASK rf_driver(2000, 13, 22);
 String stationPath = "/Station/Status/";
 String StationName[20] = {"S00", "S01", "S02", "S03", "S04", "S05", "S06", "S07", "S08", "S09", "S10", "S11", "S12", "S13", "S14", "S15", "S16", "S17", "S18", "S19"};
 String ROMData = "";
@@ -115,13 +120,21 @@ void ProcessRTC();
 void InitRTC();
 bool compareStrings(String str1, String str2);
 void updateTime(int hour, int minute, int second, int day, int month, int year);
+void processDataInRom();
+int getDayOfWeek(int day, int month, int year);
 int hourRTC = 0; 
 int minRTC = 0;
+int secRTC = 0;
+int dayRTC = 0; 
+int monthRTC = 0;
+int yeadRTC = 0;
 int count = 0;
+int minCompare = 0;
 int count_compare = 1;
 uint8_t data_RF[40]={0}; 
 uint64_t TimeRF;
-
+uint16_t TimeGetRTC[20];
+void IRAM_ATTR handleInterrupt();
 void setup() 
 {
   pinMode(OUTPUT1,OUTPUT);
@@ -135,9 +148,9 @@ void setup()
   digitalWrite(OUTPUT2,LOW);
   Serial.begin(115200);
   InitRTC();
+  processDataInRom();
   ProcessRTC();
   DisplayLCD();
-  delay(10);
   lcd.begin(16, 2);
   lcd.clear();
   lcd.setCursor(0, 0);
@@ -145,20 +158,6 @@ void setup()
   lcd.setCursor(0, 1);
   lcd.print("Wifi: "); lcd.print(wifi_ssid);
   delay(1000);
-  ConnectToWifi(100);
-  if (WiFi.status() != WL_CONNECTED)
-  {
-    lcd.clear();
-    lcd.setCursor(0,0);
-    lcd.print("WF isn't Connect");
-    delay(2000);
-    WifiStatus = E_NOT_OK;
-  }
-  else
-  {
-    WifiStatus = E_OK;
-  }
-
   // Đọc chuỗi từ ROM và hiển thị lên Serial
   ReadFromRom();
 
@@ -175,25 +174,25 @@ void setup()
   // Kết nối Firebase
   Firebase.begin(&firebaseConfigPrimary, &firebaseAuthPrimary);
   Firebase.reconnectWiFi(true);
-
-  // Kết nối Firebase Backup
-  Firebase.begin(&firebaseConfigBackup, &firebaseAuthBackup);
-  Firebase.reconnectWiFi(true);
   // Kiểm tra kết nối Firebase
   if (Firebase.ready()) {
-    Serial.println("Connected to Firebase");
+    Serial.println("Connected to Primary Firebase");
   } 
   else 
   {
     Serial.println("Firebase not ready");
   }
-
-  // Khởi tạo RF driver
-  if (!rf_driver.init()) {
-    Serial.println("init failed");
-    while (1) delay(1000);
+  // Kết nối Firebase Backup
+  Firebase.begin(&firebaseConfigBackup, &firebaseAuthBackup);
+  Firebase.reconnectWiFi(true);
+  // Kiểm tra kết nối Firebase
+  if (Firebase.ready()) {
+    Serial.println("Connected to Backup Firebase");
+  } 
+  else 
+  {
+    Serial.println("Firebase not ready");
   }
-  Serial.println("Reciver: rf_driver initialised");
 
   Serial.println(FirmwareVer);
 
@@ -211,92 +210,68 @@ void setup()
   }
   // Khởi tạo watchdog
   esp_task_wdt_init(WATCHDOG_TIMEOUT_S, true);
+
+  // Cấu hình chân 13 là đầu vào
+  pinMode(RFinterruptPin, INPUT_PULLUP);
+
+  // Đăng ký hàm xử lý ngắt
+  attachInterrupt(digitalPinToInterrupt(RFinterruptPin), handleInterrupt, FALLING);
 }
 
 void loop()
 {
-
+  if(SetTimeRTC == E_NOT_OK)
+  {
+    if(CalculateTimeValue() != (-1))
+    {
+      updateTime(hourSetRTC, minSetRTC, secSetRTC, daySetRTC, monthSetRTC, yearSetRTC);
+      SetTimeRTC = E_OK;
+    }
+  }
+  if(digitalRead(SELECT_RTC)==LOW)
+  {
+    RFinterrupt = 1;
+  }
   uint8_t data_RF_lengt = 40;
   String data_Firebase;
-  ButtonSetup();
   esp_task_wdt_reset();
-  if (rf_driver.recv(data_RF, &data_RF_lengt )) 
-  {
-    Serial.print("Message Received: ");
-    Serial.println((char*)data_RF);
-    reduceArray(data_RF,Status);
-    if((Status[StationValue] & 0x02) == 0x00)
-    {
-      TimeRF = 0;
-      ModbusStatus = E_OK;
-    }
-    else
-    {
-      TimeRF = TIME_RF_RESET;
-      ModbusStatus = E_NOT_OK;
-    }
-    displayMode = 0;
-  }
-  else
-  {
-    TimeRF++;
-    if(TimeRF > TIME_RF_MAX)
-    {
-      Status[0] = 0;
-      TimeRF = TIME_RF_RESET;
-    }
-  }
-  
-  ProcessOutput();
+
   SettingbySoftware();
   // Lựa chọn sử dụng DataBase Primary
-  if((Primary_Get == E_NOT_OK) || (TimeRF >= TIME_RF_RESET)||(Status[StationValue] & 0x02) || (digitalRead(SELECT_FIREBASE) == HIGH) )
+  if((Primary_Get == E_NOT_OK) && (digitalRead(SELECT_FIREBASE) == HIGH) )
   {
+    Firebase.begin(&firebaseConfigPrimary, &firebaseAuthPrimary);
     if (Firebase.ready())
     {
-      displayMode = 0;
-      DisplayLCD();
       if (getFirebaseData(firebaseDataPrimary, data_Firebase, stationPath.c_str() + StationName[StationValue])) 
       {
-        
         Serial.println("Get Primary Firebase successful");
         Serial.println("Data: " + data_Firebase);
         stringToArray(data_Firebase, TimeGet, 20);
         Serial.println();
-        delay(50);
-        timeValue = CalculateTimeValue();
-        Serial.println(timeValue);
-        if(timeValue >= 0)
+        if(compareStrings(data_Firebase_Compare,data_Firebase) == false)
         {
-          if(true == checkArray(TimeGet, timeValue)) 
-          {
-            Status[StationValue] = 1;
-            Serial.println("Primary: ON");
-          }
-          else
-          {
-            Status[StationValue] = 0;
-            Serial.println("Primary: OFF");
-          }
-          ProcessOutput();
-          if(compareStrings(data_Firebase_Compare,data_Firebase) == false)
-          {
-            writeArrayToEEPROM(0,TimeGet,20);
-            lcd.clear();
-            lcd.setCursor(0,0);
-            lcd.print("Saved to ROM");
-          }
-          data_Firebase_Compare = data_Firebase;
-          Primary_Get = E_OK;
-          delay(1000);
+          writeArrayToEEPROM(0,TimeGet,20);
+          lcd.setCursor(0,0);
+          lcd.print("Saved to ROM      ");
+          Serial.println("Saved to ROM");
+          processDataInRom();
         }
         else
         {
-          Serial.println("Getting time from Internet is fail");
+          lcd.setCursor(0,0);
+          lcd.print("Nothing is change      ");
+          Serial.println("Nothing is change");
         }
+
+        data_Firebase_Compare = data_Firebase;
+        Primary_Get = E_OK;
+        delay(1000);
+        RFinterrupt = 0;
       } 
       else 
       {
+        lcd.print("Primary FB Fail     ");
         Serial.println("Failed to get data from Primary");
         Primary_Get = E_NOT_OK;
         delay(1000);
@@ -309,20 +284,22 @@ void loop()
       Serial.println("Firebase is not ready");
       if (WiFi.status() != WL_CONNECTED)
       {
+        lcd.setCursor(0,0);
+        lcd.print("No Internet     ");
         WifiStatus = E_NOT_OK;
         Serial.println("Wifi isn't contected");
         WiFi.reconnect();
       }
+      delay(1000);
     }
   }
   esp_task_wdt_reset();
   // Đọc dữ liệu từ đường dẫn "test/string"
-  if((Primary_Get == E_NOT_OK) || (digitalRead(SELECT_FIREBASE)==LOW))
+  if(((Primary_Get == E_NOT_OK) || (digitalRead(SELECT_FIREBASE)==LOW))&&(Backup_Get == E_NOT_OK))
   {
     if((Backup_Get == E_NOT_OK)|| (TimeRF >= TIME_RF_RESET))
     {
-      displayMode = 0;
-      DisplayLCD();
+      Firebase.begin(&firebaseConfigBackup, &firebaseAuthBackup);
       if (Firebase.ready())
       {
         if (getFirebaseData(firebaseDataBackup, data_Firebase, stationPath.c_str() + StationName[StationValue])) 
@@ -330,71 +307,56 @@ void loop()
           Serial.println("Get Backup Firebase successful");
           Serial.println("Data: " + data_Firebase);
           stringToArray(data_Firebase, TimeGet, 20);
-          delay(50);
-          timeValue = CalculateTimeValue();
-          Serial.println(timeValue);
-          if(timeValue >= 0)  
+          if(compareStrings(data_Firebase_Compare,data_Firebase) == false)
           {
-            if(true == checkTimeRange(TimeGet, 20, timeValue)) 
-            {
-              Status[StationValue] = 1;
-              Serial.println("Backup: ON");
-            }
-            else
-            {
-              Status[StationValue] = 0;
-              Serial.println("Backup: OFF");
-            }
-            ProcessOutput();
-            if(compareStrings(data_Firebase_Compare,data_Firebase) == false)
-            {
-              writeArrayToEEPROM(0,TimeGet,20);
-              lcd.clear();
-              lcd.setCursor(0,0);
-              lcd.print("Saved to ROM");
-            }
-            data_Firebase_Compare = data_Firebase;
-            Backup_Get = E_OK;
-            delay(1000);
-          } 
-          else 
-          {
-            Serial.println("Failed to get data from Backup");
-            Backup_Get = E_NOT_OK;
-            delay(1000);
+            writeArrayToEEPROM(0,TimeGet,20);
+            lcd.setCursor(0,0);
+            lcd.print("Saved to ROM     ");
+            Serial.println("Saved to ROM");
+            processDataInRom();
           }
-        }
-        else
+          else
+          {
+            lcd.setCursor(0,0);
+            lcd.print("Nothing is change     ");
+            Serial.println("Saved to ROM");
+          }
+          data_Firebase_Compare = data_Firebase;
+          Backup_Get = E_OK;
+          delay(1000);
+        } 
+        else 
         {
-          Serial.println("Getting time from Internet is fail");          
+          lcd.setCursor(0,0);
+          lcd.print("Backup FB Fail     ");
+          Serial.println("Failed to get data from Backup");
+          Backup_Get = E_NOT_OK;
+          delay(1000);
         }
         WifiStatus = E_OK;
-      }
-      else
+        RFinterrupt = 0;
+      } 
+    }
+    else
+    {
+      Backup_Get = E_NOT_OK;
+      Serial.println("Firebase is not ready");
+      if (WiFi.status() != WL_CONNECTED)
       {
-        Backup_Get = E_NOT_OK;
-        Serial.println("Firebase is not ready");
-        if (WiFi.status() != WL_CONNECTED)
-        {
-          Serial.println("Wifi isn't contected");
-          WiFi.reconnect();
-        }
-        WifiStatus = E_NOT_OK;
+          lcd.setCursor(0,0);
+          lcd.print("No Internet     ");
+        Serial.println("Wifi isn't contected");
+        WiFi.reconnect();
       }
+      WifiStatus = E_NOT_OK;
+      delay(1000);
     }
   }
-
-  if((digitalRead(SELECT_RTC)==LOW)||((TimeRF >= TIME_RF_RESET) && (Primary_Get == E_NOT_OK) && (Backup_Get == E_NOT_OK)))
-  {
-    ProcessRTC();
-    displayMode = 1;
-    DisplayLCD();
-  }
-
-  
+  DisplayLCD();
+  ProcessRTC();
+  Serial.println(getDayOfWeek(dayRTC,monthRTC,yeadRTC));
   ProcessOutput();
-  delay(100);
-
+  delay(1000);
 }
 
 void firmwareUpdate(void) 
@@ -685,70 +647,70 @@ bool getFirebaseData(FirebaseData &firebaseData, String &a, const String &path) 
 }
 void Screen0()
 {
-  lcd.clear();
   lcd.setCursor(0,0);
-  lcd.print("RF:");
-  lcd.print(Status[0]);
-  lcd.setCursor(5,0);
+  lcd.print("T:");
+  lcd.print(hourRTC);
+  lcd.print(":");
+  lcd.print(minRTC);
+  lcd.print(":");
+  lcd.print(secRTC);
+  lcd.print(" ");
   lcd.print(StationName[StationValue]);
   lcd.print(":");
   if(digitalRead(OUTPUT1)==LOW)
   {
-    lcd.print("OFF");
+    lcd.print("0");
   }
   else
   {
-    lcd.print("ON");
+    lcd.print("1");
   }
-  lcd.print(" M:");
-  if(ModbusStatus == E_OK)
-  {
-    lcd.print("OK ");
-  }
-  else
-  {
-    lcd.print("E ");
-  }
+  lcd.print("        ");
   lcd.setCursor(0,1);
   lcd.print("W:");
   if(WifiStatus == E_OK)
   {
-    lcd.print("OK ");
+    lcd.print("1 ");
   }
   else
   {
-    lcd.print("E ");
+    lcd.print("0 ");
   }
 
-  lcd.print("F0:");
+  lcd.print("P:");
   if(Primary_Get == E_OK)
   {
-    lcd.print("OK ");
+    lcd.print("1 ");
   }
   else
   {
-    lcd.print("E ");
+    lcd.print("0 ");
   }
     
-  lcd.print("F1:");
+  lcd.print("B:");
   if(Backup_Get == E_OK)
   {
-    lcd.print("OK ");
+    lcd.print("1 ");
   }
   else
   {
-    lcd.print("E ");
+    lcd.print("0 ");
   }
+  lcd.print("I");
+  lcd.print(":");
+  lcd.print(RFinterrupt);
+  lcd.print(" ");
+  lcd.print("        ");
 }
 
 void Screen1()
 {
-  lcd.clear();
   lcd.setCursor(0,0);
   lcd.print("RTC: ");
   lcd.print(hourRTC);
   lcd.print(":");
   lcd.print(minRTC);
+  lcd.print("        ");
   lcd.setCursor(0,1);
   lcd.print(StationName[StationValue]);
   lcd.print(":");
@@ -760,7 +722,7 @@ void Screen1()
   {
     lcd.print("OFF");
   }
-
+  lcd.print("        ");
 }
 
 void DisplayLCD()
@@ -819,7 +781,7 @@ bool checkTimeRange(uint16_t timeArray[], uint16_t arraySize, uint16_t timenow) 
 bool checkArray(uint16_t arr[], uint16_t a) {
     for (int i = 0; i < 20; i += 2) {
         if (i + 1 < 20) {  // Đảm bảo không vượt quá giới hạn của mảng
-            if (a >= arr[i] && a <= arr[i + 1]) {
+            if (a >= arr[i] && a < arr[i + 1]) {
                 return true;  // Trả về 1 nếu điều kiện thỏa mãn
             }
         }
@@ -844,17 +806,21 @@ int CalculateTimeValue()
   monthSetRTC = timeinfo.tm_mon + 1;  // Tháng bắt đầu từ 0, nên cần +1
   yearSetRTC = timeinfo.tm_year + 1900;  // Năm bắt đầu từ 1900, nên cần +1900
   timeGet = timeinfo.tm_hour * 60 + timeinfo.tm_min;
+  Serial.println("Set time to RTC");
   return timeGet;
 }
 void ProcessOutput()
 {
-  if(Status[StationValue] == 0x00)
+  if((Status[StationValue] & 0x02) == 0x00)
   {
-    digitalWrite(OUTPUT1,LOW);
-  }
-  else 
-  {
-    digitalWrite(OUTPUT1,HIGH);
+    if(Status[StationValue] == 0x00)
+    {
+      digitalWrite(OUTPUT1,LOW);
+    }
+    else 
+    {
+      digitalWrite(OUTPUT1,HIGH);
+    }
   }
 }
 
@@ -867,19 +833,16 @@ void ReadFromRom()
     Serial.println("Read from ROM:");
     Serial.print("Station: "); Serial.println(StationValue);
     if((StationValue > 19) || (StationValue <1)) StationValue = 1;
-    if(false == ConnectToWifi(50))
-    {
       lcd.clear();
       lcd.setCursor(0, 0);
-      lcd.print("Backup Wifi:");
+      lcd.print("Wifi:");
       wifi_ssid = getStringBetween(ROMData, "*", 2);
       Serial.print("Wifi: "); Serial.println(wifi_ssid);
       wifi_password = getStringBetween(ROMData, "*", 3);
       Serial.print("Pass: "); Serial.println(wifi_password);
       lcd.setCursor(0, 1);
       lcd.print(wifi_ssid);
-      ConnectToWifi(200);
-    }
+      ConnectToWifi(100);
   }
   else
   {
@@ -1052,13 +1015,12 @@ void sendIPtoFirebase()
 void InitRTC()
 {
     // Khởi tạo I2C
-  Wire.begin();
+  Wire.begin(SDA_PIN,SCL_PIN);
 
   // Kiểm tra kết nối RTC
   if (!rtc.begin()) 
   {
     Serial.println("Couldn't find RTC");
-    while (1);
   }
 
   // Kiểm tra xem RTC có đang chạy không
@@ -1077,9 +1039,17 @@ void ProcessRTC()
   uint16_t timeValueRTC;
   minRTC = now.minute();
   hourRTC = now.hour();
+  secRTC = now.second();
+  dayRTC = now.day();
+  monthRTC = now.month();
+  yeadRTC = now.year();
+  if((minCompare != minRTC) || (RFinterrupt != 0))
+  {
+    Primary_Get = E_NOT_OK;
+    Backup_Get = E_NOT_OK;
+    minCompare = minRTC;
+  }
   timeValueRTC = (uint16_t)hourRTC * 60 + (uint16_t)minRTC;
-  uint16_t TimeGetRTC[20];
-  readArrayFromEEPROM(0, TimeGetRTC, 20);
   if(true == checkArray(TimeGetRTC, timeValueRTC)) 
   {
     Status[StationValue] = 1;
@@ -1152,4 +1122,47 @@ void updateTime(int hour, int minute, int second, int day, int month, int year) 
   Serial.print(':');
   Serial.print(newTime.second(), DEC);
   Serial.println();
+}
+
+void processDataInRom()
+{
+  readArrayFromEEPROM(0, TimeGetRTC, 20);
+  Serial.print("Read from 34C08: ");
+  for(int i = 0; i<20; i++)
+  {
+    Serial.print(TimeGetRTC[i]);
+    Serial.print("-");
+  }
+  Serial.println();
+}
+
+// Hàm xử lý ngắt (ISR)
+void IRAM_ATTR handleInterrupt() {
+  RFinterrupt ++;
+  if(RFinterrupt > 100)
+  {
+    RFinterrupt = 1;
+  }
+  Serial.print("Interrup: ");
+  Serial.println(RFinterrupt);
+}
+
+int getDayOfWeek(int day, int month, int year) {
+    // Điều chỉnh tháng và năm nếu tháng là January hoặc February
+    if (month < 3) 
+    {
+        month += 12;
+        year -= 1;
+    }
+
+    int k = year % 100; // Hai chữ số cuối của năm
+    int j = year / 100; // Hai chữ số đầu của năm
+
+    // Công thức Zeller’s Congruence
+    int dayOfWeek = (day + 13 * (month + 1) / 5 + k + k / 4 + j / 4 - 2 * j) % 7;
+
+    // Điều chỉnh giá trị trả về để thứ Hai là 0, Chủ Nhật là 6
+    dayOfWeek = (dayOfWeek + 5) % 7 + 2;
+
+    return dayOfWeek;
 }
