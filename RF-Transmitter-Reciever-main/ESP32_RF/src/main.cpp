@@ -44,6 +44,7 @@ HardwareSerial SerialModbus(2);
 #define RS485_TX_ENABLE 18  // GPIO18, UART2 TX enable
 #define SELECT_FIREBASE_PRIMARY 34
 #define SELECT_FIREBASE_BACKUP 35
+#define RFPin 19
 // ModbusMaster object
 ModbusMaster node;
 // Define Modbus slave ID and register ranges
@@ -85,6 +86,8 @@ int hourGet = 0, minGet = 0 , secGet = 0;
 uint16_t HMITime[2];
 uint16_t timeValue;
 uint16_t TimeGet[40] = {};
+uint16_t HMIDayOfWeek[140];
+uint16_t HMIDayOfWeekCompare[140];
 uint16_t TimeProcessed[20][20];
 uint16_t TimeCompare[20][20];
 String StationName[20] = {"/S00", "/S01", "/S02", "/S03", "/S04", "/S05", "/S06", "/S07", "/S08", "/S09", "/S10", "/S11", "/S12", "/S13", "/S14", "/S15", "/S16", "/S17", "/S18", "/S19"};
@@ -92,8 +95,8 @@ String FirmwareVer = "24.7.13.10.38";
 byte Status[20] = {0x0F, 0x0F, 0x0F, 0x0F,0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F};
 byte Firebase_Primary_Set[20] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
 byte Firebase_Backup_Set[20] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
-RH_ASK rf_driver(2000, 21, 19);
-String stationPath = "/Station/Status";
+String stationStatusPath = "/Station/Status";
+String stationDayofWeekPath = "/Station/DayofWeek";
 String ROMData = "";
 String data_Firebase;
 String convertStatusArrayToString(byte arr[20], int inputSize);
@@ -119,6 +122,8 @@ void sendRF();
 void screen1();
 bool ReadTimeFromHMI();
 void ReadFromRom();
+bool ReadDayOfWeekFromHMI(uint16_t startAddress);
+String convertArrayToString(uint16_t arr[], int length, int startIndex, int numElements);
 void setup() {
   Serial.begin(115200);
   delay(10);
@@ -129,10 +134,11 @@ void setup() {
   lcd.print("V:");lcd.print(FirmwareVer);
   lcd.setCursor(0, 1);
   lcd.print("Wifi: "); lcd.print(wifi_ssid);
-  delay(1000);
   // Đọc chuỗi từ ROM và hiển thị lên Serial
   ReadFromRom();
   // Cấu hình Firebase
+  pinMode(RFPin,OUTPUT);
+  digitalWrite(RFPin,HIGH);
   firebaseConfigPrimary.host = FIREBASE_HOST_PRIMARY;
   firebaseConfigPrimary.signer.tokens.legacy_token = FIREBASE_AUTH_PRIMARY;
   firebaseConfigPrimary.timeout.serverResponse = 5 * 1000;
@@ -154,12 +160,6 @@ void setup() {
   {
     Serial.println("Connected to Firebase");
   }
-  // Khởi tạo RF driver
-  if (!rf_driver.init()) {
-    Serial.println("init failed");
-    while (1) delay(1000);
-  }
-  Serial.println("Transmitter: rf_driver initialised");
 
   // Initialize UART for Modbus communication
   SerialModbus.begin(9600, SERIAL_8N1, RS485_RXD2, RS485_TXD2);
@@ -186,10 +186,34 @@ void setup() {
 int count;
 void loop()
 {
-  if((false == ReadTimeFromHMI())||(SetTimeHMI == E_NOT_OK))
-  {
-    printLocalTime();
-  }
+  printLocalTime();
+  // if((false == ReadTimeFromHMI())||(SetTimeHMI == E_NOT_OK))
+  // {
+  //   printLocalTime();
+  // }
+  // if(true == ReadDayOfWeekFromHMI(0))
+  // {
+  //   for(int i = 1; i<20; i++)
+  //   {
+  //     for(int y = 0; i<7; i++)
+  //     {
+  //       if(HMIDayOfWeek[i*7+y] != HMIDayOfWeekCompare[i*7+y])
+  //       {
+  //         Firebase_Primary_Set[i] = E_NOT_OK;
+  //         Firebase_Backup_Set[i] = E_NOT_OK;
+  //         break;
+  //       } 
+  //     }
+  //   }
+  // }
+
+  // for(int i = 1; i<20; i++)
+  // {
+  //   for(int y = 0; i<7; i++)
+  //   {
+  //     HMIDayOfWeekCompare[i*7+y] = HMIDayOfWeek[i*7+y];
+  //   }
+  // }
   esp_task_wdt_reset();
   SettingbySoftware();
   screen1();
@@ -201,15 +225,15 @@ void loop()
     }
   }
   esp_task_wdt_reset();
-  for (uint16_t i = 1; i < 20; i++)
-  {
-    if (true == readRegisters(1000+i*40, 40, TimeGet))
-    {
-      esp_task_wdt_reset();
-      reduceArray(TimeGet, TimeProcessed[i], 40);
-      delay(10);
-    }
-  }
+  // for (uint16_t i = 1; i < 20; i++)
+  // {
+  //   if (true == readRegisters(1000+i*40, 40, TimeGet))
+  //   {
+  //     esp_task_wdt_reset();
+  //     reduceArray(TimeGet, TimeProcessed[i], 40);
+  //     delay(10);
+  //   }
+  // }
   for(int RowIndex = 1; RowIndex < 20; RowIndex++)
   {
     for(int ColIndex = 0; ColIndex <20; ColIndex++)
@@ -241,8 +265,9 @@ for( int Num = 1; Num < 20; Num++)
     {
 
       data_Firebase = arrayToString(TimeProcessed[Num], 20);
+      data_Firebase += convertArrayToString(HMIDayOfWeek, 140, Num*7, 7);
       Serial.println(data_Firebase);
-      if (Firebase.setString(firebaseDataPrimary, stationPath.c_str() + StationName[Num], data_Firebase.c_str()))
+      if (Firebase.setString(firebaseDataPrimary, stationStatusPath.c_str() + StationName[Num], data_Firebase.c_str()))
       {
         Serial.print("Write Successfully to The Primary Firebase: ");Serial.println(Num);
         Firebase_Primary_Set[Num] = E_OK;
@@ -285,8 +310,9 @@ for( int Num = 1; Num < 20; Num++)
     if (Firebase.ready())
     {
       data_Firebase = arrayToString(TimeProcessed[Num], 20);
+      data_Firebase += convertArrayToString(HMIDayOfWeek, 140, Num*7, 7);
       Serial.println(data_Firebase);
-      if (Firebase.setString(firebaseDataBackup, stationPath.c_str() + StationName[Num] , data_Firebase.c_str()))
+      if (Firebase.setString(firebaseDataBackup, stationStatusPath.c_str() + StationName[Num] , data_Firebase.c_str()))
       {
         Serial.print("Write Successfully to The Backup Firebase: ");
         Serial.println(Num);
@@ -363,6 +389,63 @@ bool ReadTimeFromHMI()
   hourGet = (int)HMITime[2];
   minGet = (int)HMITime[1];
   secGet = (int)HMITime[0];
+  return result;
+}
+
+String convertArrayToString(uint16_t arr[], int length, int startIndex, int numElements) {
+  String result = ""; // Chuỗi kết quả
+
+  // Kiểm tra chỉ số bắt đầu và số lượng phần tử có hợp lệ không
+  if (startIndex < 0 || startIndex >= length || numElements <= 0) {
+    return "Invalid input"; // Trả về thông báo lỗi nếu đầu vào không hợp lệ
+  }
+
+  // Xác định phần tử kết thúc (không vượt quá độ dài mảng)
+  int endIndex = startIndex + numElements;
+  if (endIndex > length) {
+    endIndex = length;
+  }
+
+  for (int i = startIndex; i < endIndex; i++) {
+    result += arr[i]; // Thêm ký tự từ mảng vào chuỗi
+    result += "*"; // Thêm dấu '*' nếu không phải là ký tự cuối cùng
+  }
+
+  return result; // Trả về chuỗi kết quả
+}
+
+bool ReadDayOfWeekFromHMI(uint16_t startAddress)
+{
+  bool result;
+  uint16_t HMIDayOfWeekStub[70];
+  result = readRegisters(startAddress, 70, HMIDayOfWeek);
+  if(result == false)
+  {
+    Serial.println("Modbus Fail 1");
+    return result;
+  }
+  // for(int i = 0; i < 70; i++)
+  // {
+  //   Serial.print(HMIDayOfWeek[i]);
+  //   Serial.print(" ");
+  // }
+  // Serial.println(" ");
+  result = readRegisters(startAddress+70, 70, HMIDayOfWeekStub);
+  if(result == false)
+  {
+    Serial.println("Modbus Fail 2");
+    return result;
+  }
+  for(int i = 0; i < 70; i++)
+  {
+    HMIDayOfWeek[70+i] = HMIDayOfWeekStub[i];
+  }
+  for(int i = 0; i < 140; i++)
+  {
+    Serial.print(HMIDayOfWeek[i]);
+    Serial.print(" ");
+  }
+  Serial.println();
   return result;
 }
 
@@ -718,16 +801,6 @@ String arrayToString(uint16_t arr[], int size)
 
 void sendRF()
 {
-  String data_transmit = convertStatusArrayToString(Status, 20);
-  Serial.println("Data to transmit: " + data_transmit);
-
-  // Convert String to char array
-  char msg[50];
-  data_transmit.toCharArray(msg, data_transmit.length() + 1);
-  rf_driver.send((uint8_t *)msg, strlen(msg));
-  rf_driver.waitPacketSent();
-  count++;
-  if(count > 9) count = 1;
 }
 
 void screen1()

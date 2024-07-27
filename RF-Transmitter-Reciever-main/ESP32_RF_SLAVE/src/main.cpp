@@ -83,14 +83,14 @@ String FirmwareVer = "24.7.13.10.38";
 uint8_t Status[20] = {0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 uint8_t Status_Firebase[20] = {0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 int hourSetRTC, minSetRTC, secSetRTC, daySetRTC, monthSetRTC, yearSetRTC;
-uint16_t TimeGet[40];
+uint16_t TimeGet[27];
 String stationPath = "/Station/Status/";
 String StationName[20] = {"S00", "S01", "S02", "S03", "S04", "S05", "S06", "S07", "S08", "S09", "S10", "S11", "S12", "S13", "S14", "S15", "S16", "S17", "S18", "S19"};
 String ROMData = "";
 String data_Firebase_Compare;
 byte Primary_Get = E_NOT_OK;
 byte Backup_Get = E_NOT_OK;
-byte SetTimeRTC = E_OK;
+byte SetTimeRTC = E_NOT_OK;
 int displayMode = 0;
 void firmwareUpdate();
 int FirmwareVersionCheck(void);
@@ -115,7 +115,6 @@ String getStringBetween(String input, String delimiter, int index);
 String replaceFirstStringWithNumber(String originalString, int number); 
 void writeArrayToEEPROM(uint16_t startAddress, uint16_t* data, uint16_t length);
 void readArrayFromEEPROM(uint16_t startAddress, uint16_t* data, uint16_t length);
-void ButtonSetup();
 void ProcessRTC();
 void InitRTC();
 bool compareStrings(String str1, String str2);
@@ -133,7 +132,7 @@ int minCompare = 0;
 int count_compare = 1;
 uint8_t data_RF[40]={0}; 
 uint64_t TimeRF;
-uint16_t TimeGetRTC[20];
+uint16_t TimeGetRTC[27];
 void IRAM_ATTR handleInterrupt();
 void setup() 
 {
@@ -202,6 +201,7 @@ void setup()
   
   // Cấu hình máy chủ NTP
   configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+  delay(1000);
   DisplayLCD();
   if(CalculateTimeValue() != (-1))
   {
@@ -247,11 +247,11 @@ void loop()
       {
         Serial.println("Get Primary Firebase successful");
         Serial.println("Data: " + data_Firebase);
-        stringToArray(data_Firebase, TimeGet, 20);
+        stringToArray(data_Firebase, TimeGet, 27);
         Serial.println();
         if(compareStrings(data_Firebase_Compare,data_Firebase) == false)
         {
-          writeArrayToEEPROM(0,TimeGet,20);
+          writeArrayToEEPROM(0,TimeGet,27);
           lcd.setCursor(0,0);
           lcd.print("Saved to ROM      ");
           Serial.println("Saved to ROM");
@@ -306,10 +306,10 @@ void loop()
         {
           Serial.println("Get Backup Firebase successful");
           Serial.println("Data: " + data_Firebase);
-          stringToArray(data_Firebase, TimeGet, 20);
+          stringToArray(data_Firebase, TimeGet, 27);
           if(compareStrings(data_Firebase_Compare,data_Firebase) == false)
           {
-            writeArrayToEEPROM(0,TimeGet,20);
+            writeArrayToEEPROM(0,TimeGet,27);
             lcd.setCursor(0,0);
             lcd.print("Saved to ROM     ");
             Serial.println("Saved to ROM");
@@ -354,7 +354,7 @@ void loop()
   }
   DisplayLCD();
   ProcessRTC();
-  Serial.println(getDayOfWeek(dayRTC,monthRTC,yeadRTC));
+  Serial.println(SetTimeRTC);
   ProcessOutput();
   delay(1000);
 }
@@ -896,86 +896,6 @@ String replaceFirstStringWithNumber(String originalString, int number)
   return newString;
 }
 
-void ButtonSetup()
-{
-  if(digitalRead(SETBUTTTON) == LOW)
-  {
-    delay(2000);
-    if(digitalRead(SETBUTTTON) == LOW)
-    {
-      lcd.clear();
-      lcd.setCursor(0,0);
-      lcd.print("Start to Setting");
-      lcd.setCursor(0,1);
-      lcd.print("Release SET button");
-      while(digitalRead(SETBUTTTON) == LOW);
-      lcd.clear();
-      lcd.setCursor(0,0);
-      lcd.print("Staion: ");      
-      delay(1000);
-      while(digitalRead(SETBUTTTON) == HIGH)
-      {
-        if(digitalRead(UPBUTTON))
-        {
-          delay(500);
-          StationValue++;
-          if(StationValue > 19)StationValue = 19;
-        }
-        if(digitalRead(DOWNBUTTON))
-        {
-          delay(500);
-          StationValue;
-          if(StationValue < 1)StationValue = 1;
-        }
-        lcd.setCursor(6,0);
-        lcd.print(StationValue);
-      }
-      while(digitalRead(SETBUTTTON) == LOW);
-      replaceFirstStringWithNumber(ROMData,StationValue);
-      writeStringToROM(ROMData);
-      lcd.clear();
-      lcd.setCursor(0,0);
-      lcd.print("Save to ROM: ");
-      delay(2000);
-      bool SaveToROM = false;
-      while(digitalRead(SETBUTTTON) == HIGH)
-      {
-        if(digitalRead(UPBUTTON)==LOW)
-        {
-          SaveToROM = true;
-        }
-        if(digitalRead(DOWNBUTTON)==LOW)
-        {
-          SaveToROM = false;
-        }
-        lcd.setCursor(13,0);
-        if(SaveToROM == true)
-        {
-          lcd.print("YES");
-        }
-        else
-        {
-          lcd.print("NO ");
-        }
-      }
-      if(SaveToROM == true)
-      {
-        for(int i = 0; i<20; i++)
-        {
-          if(TimeGet[i] != 0)
-          {
-            writeArrayToEEPROM(0, TimeGet, 20);
-          }
-        }
-      }
-      lcd.clear();
-      lcd.setCursor(0,0);
-      lcd.print("Finished to Set");
-      delay(3000);
-    }
-  }
-}
-
 void sendIPtoFirebase()
 {
   if((Status[StationValue] & 0x04))
@@ -1126,9 +1046,9 @@ void updateTime(int hour, int minute, int second, int day, int month, int year) 
 
 void processDataInRom()
 {
-  readArrayFromEEPROM(0, TimeGetRTC, 20);
+  readArrayFromEEPROM(0, TimeGetRTC, 27);
   Serial.print("Read from 34C08: ");
-  for(int i = 0; i<20; i++)
+  for(int i = 0; i<27; i++)
   {
     Serial.print(TimeGetRTC[i]);
     Serial.print("-");
