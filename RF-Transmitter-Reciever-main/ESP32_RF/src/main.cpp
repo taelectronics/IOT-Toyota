@@ -78,6 +78,7 @@ String wifi_password = "cka12345";
 byte WifiStatus;
 int TimeSendRF;
 // Example arrays
+byte modbusStatus = E_NOT_OK;
 byte StationValue;
 byte Firebase_Backup_Status = E_NOT_OK;
 byte Firebase_Primary_Status = E_NOT_OK;
@@ -90,6 +91,7 @@ uint16_t HMIDayOfWeek[140];
 uint16_t HMIDayOfWeekCompare[140];
 uint16_t TimeProcessed[20][20];
 uint16_t TimeCompare[20][20];
+uint16_t SettingParametter[80];
 String StationName[20] = {"/S00", "/S01", "/S02", "/S03", "/S04", "/S05", "/S06", "/S07", "/S08", "/S09", "/S10", "/S11", "/S12", "/S13", "/S14", "/S15", "/S16", "/S17", "/S18", "/S19"};
 String FirmwareVer = "24.7.13.10.38";
 byte Status[20] = {0x0F, 0x0F, 0x0F, 0x0F,0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F};
@@ -123,6 +125,7 @@ void screen1();
 bool ReadTimeFromHMI();
 void ReadFromRom();
 bool ReadDayOfWeekFromHMI(uint16_t startAddress);
+bool ReadSettingParam(uint16_t startAddress);
 String convertArrayToString(uint16_t arr[], int length, int startIndex, int numElements);
 void setup() {
   Serial.begin(115200);
@@ -141,12 +144,12 @@ void setup() {
   digitalWrite(RFPin,HIGH);
   firebaseConfigPrimary.host = FIREBASE_HOST_PRIMARY;
   firebaseConfigPrimary.signer.tokens.legacy_token = FIREBASE_AUTH_PRIMARY;
-  firebaseConfigPrimary.timeout.serverResponse = 5 * 1000;
+  // firebaseConfigPrimary.timeout.serverResponse = 1000;
 
   // // Cấu hình Firebase Backup
   firebaseConfigBackup.host = FIREBASE_HOST_BACKUP;
   firebaseConfigBackup.signer.tokens.legacy_token = FIREBASE_AUTH_BACKUP;
-  firebaseConfigBackup.timeout.serverResponse = 5 * 1000;
+  // firebaseConfigBackup.timeout.serverResponse = 1000;
 
   // Kết nối Firebase
   Firebase.begin(&firebaseConfigBackup, &firebaseAuthBackup);
@@ -184,36 +187,66 @@ void setup() {
 
 }
 int count;
+int firstTime = 0;
 void loop()
 {
-  printLocalTime();
-  // if((false == ReadTimeFromHMI())||(SetTimeHMI == E_NOT_OK))
-  // {
-  //   printLocalTime();
-  // }
-  // if(true == ReadDayOfWeekFromHMI(0))
-  // {
-  //   for(int i = 1; i<20; i++)
-  //   {
-  //     for(int y = 0; i<7; i++)
-  //     {
-  //       if(HMIDayOfWeek[i*7+y] != HMIDayOfWeekCompare[i*7+y])
-  //       {
-  //         Firebase_Primary_Set[i] = E_NOT_OK;
-  //         Firebase_Backup_Set[i] = E_NOT_OK;
-  //         break;
-  //       } 
-  //     }
-  //   }
-  // }
+  
+  if((false == ReadTimeFromHMI())||(SetTimeHMI == E_NOT_OK))
+  {
+    printLocalTime();
+  }
+  if(true == ReadDayOfWeekFromHMI(200))
+  {
+    for(int i = 7; i<140; i++)
+    {
+      if(HMIDayOfWeekCompare[i] != HMIDayOfWeek[i])
+      {
+      Firebase_Primary_Set[i/7] = E_NOT_OK;
+      Firebase_Backup_Set[i/7] = E_NOT_OK;
+      }
+    }
+    for (int i = 0; i<140; i++)
+    {
+      HMIDayOfWeekCompare[i] = HMIDayOfWeek[i];
+    }
+    modbusStatus = E_OK;
+  }
+  else
+  {
+    modbusStatus = E_NOT_OK;
+  }
 
-  // for(int i = 1; i<20; i++)
-  // {
-  //   for(int y = 0; i<7; i++)
-  //   {
-  //     HMIDayOfWeekCompare[i*7+y] = HMIDayOfWeek[i*7+y];
-  //   }
-  // }
+  if(true == ReadSettingParam(0))
+  {
+    if(SettingParametter[0]==1)
+    {
+      Serial.println("Manual Mode");
+      for(int i = 1; i<20; i++)
+      {
+        if(SettingParametter[i] == 1)
+        {
+          for(int y = 0; y<7; y++)
+          {
+            HMIDayOfWeek[i*7 + y] |= 0x02;
+          }
+        }
+        else
+        {
+          for(int y = 0; y<7; y++)
+          {
+            HMIDayOfWeek[i*7 + y] |= 0x4;
+          }
+        } 
+        Firebase_Primary_Set[i] = E_NOT_OK;
+        Firebase_Backup_Set[i] = E_NOT_OK;
+      }
+    }
+  }
+  for(int i = 0; i<140; i++)
+  {
+    Serial.print(HMIDayOfWeek[i]);
+    Serial.print(" ");
+  }
   esp_task_wdt_reset();
   SettingbySoftware();
   screen1();
@@ -225,15 +258,15 @@ void loop()
     }
   }
   esp_task_wdt_reset();
-  // for (uint16_t i = 1; i < 20; i++)
-  // {
-  //   if (true == readRegisters(1000+i*40, 40, TimeGet))
-  //   {
-  //     esp_task_wdt_reset();
-  //     reduceArray(TimeGet, TimeProcessed[i], 40);
-  //     delay(10);
-  //   }
-  // }
+  for (uint16_t i = 1; i < 20; i++)
+  {
+    if (true == readRegisters(1000+i*40, 40, TimeGet))
+    {
+      esp_task_wdt_reset();
+      reduceArray(TimeGet, TimeProcessed[i], 40);
+      delay(10);
+    }
+  }
   for(int RowIndex = 1; RowIndex < 20; RowIndex++)
   {
     for(int ColIndex = 0; ColIndex <20; ColIndex++)
@@ -251,6 +284,7 @@ for( int Num = 1; Num < 20; Num++)
   if((Firebase_Primary_Set[Num] == E_NOT_OK))
   {
       Firebase.begin(&firebaseConfigPrimary, &firebaseAuthPrimary);
+      Serial.println("Begin with Primary Firebase");
       break;
   }
 }
@@ -266,7 +300,6 @@ for( int Num = 1; Num < 20; Num++)
 
       data_Firebase = arrayToString(TimeProcessed[Num], 20);
       data_Firebase += convertArrayToString(HMIDayOfWeek, 140, Num*7, 7);
-      Serial.println(data_Firebase);
       if (Firebase.setString(firebaseDataPrimary, stationStatusPath.c_str() + StationName[Num], data_Firebase.c_str()))
       {
         Serial.print("Write Successfully to The Primary Firebase: ");Serial.println(Num);
@@ -278,7 +311,7 @@ for( int Num = 1; Num < 20; Num++)
         Serial.println("Failed to Write Primary Firebase: "); Serial.println(Num);
         Serial.println(firebaseDataPrimary.errorReason());
       }
-      TimeSendRF = 5;
+      Serial.println(data_Firebase);
       WifiStatus = E_OK;
     }
     else
@@ -298,8 +331,11 @@ for( int Num = 1; Num < 20; Num++)
 for( int Num = 1; Num < 20; Num++)
 {
   if((Firebase_Backup_Set[Num] == E_NOT_OK))
-  Firebase.begin(&firebaseConfigBackup, &firebaseAuthBackup);
-  break;
+  {
+    Firebase.begin(&firebaseConfigBackup, &firebaseAuthBackup);
+    Serial.println("Begin with Backup Firebase");
+    break;
+  }
 }
   // Lựa chọn sử dụng DataBase Backup
 for( int Num = 1; Num < 20; Num++)
@@ -311,7 +347,6 @@ for( int Num = 1; Num < 20; Num++)
     {
       data_Firebase = arrayToString(TimeProcessed[Num], 20);
       data_Firebase += convertArrayToString(HMIDayOfWeek, 140, Num*7, 7);
-      Serial.println(data_Firebase);
       if (Firebase.setString(firebaseDataBackup, stationStatusPath.c_str() + StationName[Num] , data_Firebase.c_str()))
       {
         Serial.print("Write Successfully to The Backup Firebase: ");
@@ -324,7 +359,7 @@ for( int Num = 1; Num < 20; Num++)
         Serial.print("Failed to Write Backup Firebase: "); Serial.println(Num);
         Serial.println(firebaseDataBackup.errorReason());
       }
-      TimeSendRF = 5;
+      Serial.println(data_Firebase);
       WifiStatus = E_OK;
     }
     else
@@ -340,12 +375,6 @@ for( int Num = 1; Num < 20; Num++)
     }
   delay(1000);
   } 
-}
-if(TimeSendRF > 0)
-{
-  sendRF();
-  TimeSendRF--;
-  delay(1000);
 }
 
 }
@@ -414,6 +443,18 @@ String convertArrayToString(uint16_t arr[], int length, int startIndex, int numE
   return result; // Trả về chuỗi kết quả
 }
 
+bool ReadSettingParam(uint16_t startAddress)
+{
+  bool result;
+  result = readRegisters(startAddress, 80, SettingParametter);
+  if(result == false)
+  {
+    Serial.println("Modbus Fail 1");
+    return result;
+  }
+  return result;
+}
+
 bool ReadDayOfWeekFromHMI(uint16_t startAddress)
 {
   bool result;
@@ -424,12 +465,6 @@ bool ReadDayOfWeekFromHMI(uint16_t startAddress)
     Serial.println("Modbus Fail 1");
     return result;
   }
-  // for(int i = 0; i < 70; i++)
-  // {
-  //   Serial.print(HMIDayOfWeek[i]);
-  //   Serial.print(" ");
-  // }
-  // Serial.println(" ");
   result = readRegisters(startAddress+70, 70, HMIDayOfWeekStub);
   if(result == false)
   {
@@ -440,12 +475,15 @@ bool ReadDayOfWeekFromHMI(uint16_t startAddress)
   {
     HMIDayOfWeek[70+i] = HMIDayOfWeekStub[i];
   }
+  /*
   for(int i = 0; i < 140; i++)
   {
     Serial.print(HMIDayOfWeek[i]);
     Serial.print(" ");
   }
   Serial.println();
+  */
+
   return result;
 }
 
@@ -799,15 +837,18 @@ String arrayToString(uint16_t arr[], int size)
   return result;
 }
 
-void sendRF()
-{
-}
-
 void screen1()
 {
   lcd.setCursor(0,0);
-  lcd.print("RF:");
-  lcd.print(TimeSendRF);
+  lcd.print("M:");
+  if(modbusStatus == E_OK)
+  {
+    lcd.print("1");
+  }
+  else
+  {
+    lcd.print("0");
+  }
   lcd.print(" ");
   lcd.print(hourGet);lcd.print(":");
   lcd.print(minGet);lcd.print(":");

@@ -13,7 +13,9 @@
 #include <LiquidCrystal.h>
 #include "time.h"
 #include "esp_task_wdt.h"
+#include "esp_timer.h"
 
+esp_timer_handle_t timer;
 // Chân GPIO để sử dụng cho ngắt ngoài
 const int RFinterruptPin = 13;
 // Biến để đếm số lần ngắt
@@ -75,6 +77,7 @@ String wifi_ssid = "CKA Automation";
 String wifi_password = "cka12345";
 
 // Example arrays
+int DayOfWeekCalculate;
 byte StationValue = 2;
 byte WifiStatus = E_NOT_OK;
 byte ModbusStatus = E_NOT_OK;
@@ -84,6 +87,7 @@ uint8_t Status[20] = {0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 uint8_t Status_Firebase[20] = {0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 int hourSetRTC, minSetRTC, secSetRTC, daySetRTC, monthSetRTC, yearSetRTC;
 uint16_t TimeGet[27];
+byte DayStatus = E_NOT_OK;
 String stationPath = "/Station/Status/";
 String StationName[20] = {"S00", "S01", "S02", "S03", "S04", "S05", "S06", "S07", "S08", "S09", "S10", "S11", "S12", "S13", "S14", "S15", "S16", "S17", "S18", "S19"};
 String ROMData = "";
@@ -133,7 +137,10 @@ int count_compare = 1;
 uint8_t data_RF[40]={0}; 
 uint64_t TimeRF;
 uint16_t TimeGetRTC[27];
-void IRAM_ATTR handleInterrupt();
+
+void IRAM_ATTR onTimer(void* arg);
+void InitTimer();
+
 void setup() 
 {
   pinMode(OUTPUT1,OUTPUT);
@@ -149,6 +156,7 @@ void setup()
   InitRTC();
   processDataInRom();
   ProcessRTC();
+  ProcessOutput();
   DisplayLCD();
   lcd.begin(16, 2);
   lcd.clear();
@@ -201,7 +209,6 @@ void setup()
   
   // Cấu hình máy chủ NTP
   configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
-  delay(1000);
   DisplayLCD();
   if(CalculateTimeValue() != (-1))
   {
@@ -211,11 +218,7 @@ void setup()
   // Khởi tạo watchdog
   esp_task_wdt_init(WATCHDOG_TIMEOUT_S, true);
 
-  // Cấu hình chân 13 là đầu vào
-  pinMode(RFinterruptPin, INPUT_PULLUP);
-
-  // Đăng ký hàm xử lý ngắt
-  attachInterrupt(digitalPinToInterrupt(RFinterruptPin), handleInterrupt, FALLING);
+  InitTimer();
 }
 
 void loop()
@@ -260,8 +263,8 @@ void loop()
         else
         {
           lcd.setCursor(0,0);
-          lcd.print("Nothing is change      ");
-          Serial.println("Nothing is change");
+          lcd.print("Nothing's change      ");
+          Serial.println("Nothing's change");
         }
 
         data_Firebase_Compare = data_Firebase;
@@ -318,8 +321,8 @@ void loop()
           else
           {
             lcd.setCursor(0,0);
-            lcd.print("Nothing is change     ");
-            Serial.println("Saved to ROM");
+            lcd.print("Nothing's change     ");
+            Serial.println("Nothing's change");
           }
           data_Firebase_Compare = data_Firebase;
           Backup_Get = E_OK;
@@ -353,9 +356,6 @@ void loop()
     }
   }
   DisplayLCD();
-  ProcessRTC();
-  Serial.println(SetTimeRTC);
-  ProcessOutput();
   delay(1000);
 }
 
@@ -648,7 +648,9 @@ bool getFirebaseData(FirebaseData &firebaseData, String &a, const String &path) 
 void Screen0()
 {
   lcd.setCursor(0,0);
-  lcd.print("T:");
+  lcd.print("T");
+  lcd.print(DayOfWeekCalculate+2);
+  lcd.print(":");
   lcd.print(hourRTC);
   lcd.print(":");
   lcd.print(minRTC);
@@ -696,11 +698,17 @@ void Screen0()
   {
     lcd.print("0 ");
   }
-  lcd.print("I");
+  lcd.print("D");
   lcd.print(":");
-  lcd.print(RFinterrupt);
-  lcd.print(" ");
-  lcd.print("        ");
+  if(DayStatus == E_OK)
+  {
+    lcd.print("1      ");
+  }
+  else
+  {
+    lcd.print("0     ");
+  }
+  
 }
 
 void Screen1()
@@ -970,7 +978,22 @@ void ProcessRTC()
     minCompare = minRTC;
   }
   timeValueRTC = (uint16_t)hourRTC * 60 + (uint16_t)minRTC;
-  if(true == checkArray(TimeGetRTC, timeValueRTC)) 
+
+  DayOfWeekCalculate = getDayOfWeek(dayRTC,monthRTC,yeadRTC);
+  Serial.print("DayOfWeek:");
+  Serial.print(DayOfWeekCalculate);
+  Serial.print(" Value:");
+  Serial.println(TimeGet[20 + DayOfWeekCalculate]);
+  
+  if(TimeGet[20 + DayOfWeekCalculate] != 0x00)
+  {
+    DayStatus = E_OK;
+  }
+  else
+  {
+    DayStatus = E_NOT_OK;
+  }
+  if((true == checkArray(TimeGetRTC, timeValueRTC)) && (DayStatus == E_OK))
   {
     Status[StationValue] = 1;
   }
@@ -1082,7 +1105,42 @@ int getDayOfWeek(int day, int month, int year) {
     int dayOfWeek = (day + 13 * (month + 1) / 5 + k + k / 4 + j / 4 - 2 * j) % 7;
 
     // Điều chỉnh giá trị trả về để thứ Hai là 0, Chủ Nhật là 6
-    dayOfWeek = (dayOfWeek + 5) % 7 + 2;
+    dayOfWeek = (dayOfWeek + 5) % 7;
 
     return dayOfWeek;
+}
+
+void InitTimer()
+{
+      // Cấu hình và khởi tạo timer
+    const esp_timer_create_args_t timer_args = {
+        .callback = &onTimer,
+        .arg = NULL,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "example_timer"
+    };
+
+    esp_err_t err = esp_timer_create(&timer_args, &timer);
+    if (err != ESP_OK) {
+        Serial.println("Failed to create timer");
+        return;
+    }
+
+    // Đặt timer để hết hạn sau 1 giây (1000000 micro giây)
+    err = esp_timer_start_once(timer, 1000000);
+    if (err != ESP_OK) {
+        Serial.println("Failed to start timer");
+        return;
+    }
+
+    Serial.println("Timer started");
+}
+
+// Hàm callback sẽ được gọi khi timer hết hạn
+void IRAM_ATTR onTimer(void* arg) {
+    // Xử lý công việc khi ngắt xảy ra
+    ProcessRTC();
+    ProcessOutput();
+    // Khởi động lại timer
+    esp_timer_start_once(timer, 1000000); // 1 giây
 }
