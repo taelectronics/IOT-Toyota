@@ -82,7 +82,7 @@ byte StationValue = 2;
 byte WifiStatus = E_NOT_OK;
 byte ModbusStatus = E_NOT_OK;
 int timeValue;
-String FirmwareVer = "24.7.13.10.38";
+String FirmwareVer = "31.7.18.22";
 uint8_t Status[20] = {0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 uint8_t Status_Firebase[20] = {0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 int hourSetRTC, minSetRTC, secSetRTC, daySetRTC, monthSetRTC, yearSetRTC;
@@ -819,8 +819,7 @@ int CalculateTimeValue()
 }
 void ProcessOutput()
 {
-  if((Status[StationValue] & 0x02) == 0x00)
-  {
+
     if(Status[StationValue] == 0x00)
     {
       digitalWrite(OUTPUT1,LOW);
@@ -829,7 +828,6 @@ void ProcessOutput()
     {
       digitalWrite(OUTPUT1,HIGH);
     }
-  }
 }
 
 void ReadFromRom()

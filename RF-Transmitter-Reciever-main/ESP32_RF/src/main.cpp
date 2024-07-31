@@ -93,7 +93,7 @@ uint16_t TimeProcessed[20][20];
 uint16_t TimeCompare[20][20];
 uint16_t SettingParametter[80];
 String StationName[20] = {"/S00", "/S01", "/S02", "/S03", "/S04", "/S05", "/S06", "/S07", "/S08", "/S09", "/S10", "/S11", "/S12", "/S13", "/S14", "/S15", "/S16", "/S17", "/S18", "/S19"};
-String FirmwareVer = "24.7.13.10.38";
+String FirmwareVer = "31.7.18.22";
 byte Status[20] = {0x0F, 0x0F, 0x0F, 0x0F,0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F};
 byte Firebase_Primary_Set[20] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
 byte Firebase_Backup_Set[20] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
@@ -215,6 +215,8 @@ void loop()
   {
     modbusStatus = E_NOT_OK;
   }
+// nếu là chế độ manual thì gán kèm giá trị vào cùng với thứ trong tuần
+// quy ước: nếu on thì gửi đi kèm 0x02 nếu of thì gửi 0x00
 
   if(true == ReadSettingParam(0))
   {
@@ -234,7 +236,7 @@ void loop()
         {
           for(int y = 0; y<7; y++)
           {
-            HMIDayOfWeek[i*7 + y] |= 0x4;
+            HMIDayOfWeek[i*7 + y] = 0x0;
           }
         } 
         Firebase_Primary_Set[i] = E_NOT_OK;
@@ -302,11 +304,17 @@ for( int Num = 1; Num < 20; Num++)
       data_Firebase += convertArrayToString(HMIDayOfWeek, 140, Num*7, 7);
       if (Firebase.setString(firebaseDataPrimary, stationStatusPath.c_str() + StationName[Num], data_Firebase.c_str()))
       {
+        lcd.setCursor(0,0);
+        lcd.print("PRI "); lcd.print(Num);
+        lcd.print(": OK");
         Serial.print("Write Successfully to The Primary Firebase: ");Serial.println(Num);
         Firebase_Primary_Set[Num] = E_OK;
       }
       else
       {
+        lcd.setCursor(0,0);
+        lcd.print("PRI "); lcd.print(Num);
+        lcd.print(": ERROR");
         Firebase_Primary_Set[Num] = E_NOT_OK;
         Serial.println("Failed to Write Primary Firebase: "); Serial.println(Num);
         Serial.println(firebaseDataPrimary.errorReason());
@@ -320,6 +328,8 @@ for( int Num = 1; Num < 20; Num++)
       Serial.println("Firebase is not ready");
       if (WiFi.status() != WL_CONNECTED)
       {
+        lcd.setCursor(0,0);
+        lcd.print("Wifi isn't contected"); 
         WifiStatus = E_NOT_OK;
         Serial.println("Wifi isn't contected");
         WiFi.reconnect();
@@ -349,12 +359,18 @@ for( int Num = 1; Num < 20; Num++)
       data_Firebase += convertArrayToString(HMIDayOfWeek, 140, Num*7, 7);
       if (Firebase.setString(firebaseDataBackup, stationStatusPath.c_str() + StationName[Num] , data_Firebase.c_str()))
       {
+        lcd.setCursor(0,0);
+        lcd.print("BAK "); lcd.print(Num);
+        lcd.print(": OK            ");
         Serial.print("Write Successfully to The Backup Firebase: ");
         Serial.println(Num);
         Firebase_Backup_Set[Num] = E_OK;
       }
       else
       {
+        lcd.setCursor(0,0);
+        lcd.print("BAK "); lcd.print(Num);
+        lcd.print(": ERROR        ");
         Firebase_Backup_Set[Num] = E_NOT_OK;
         Serial.print("Failed to Write Backup Firebase: "); Serial.println(Num);
         Serial.println(firebaseDataBackup.errorReason());
@@ -369,6 +385,8 @@ for( int Num = 1; Num < 20; Num++)
       WifiStatus = E_NOT_OK;
       if (WiFi.status() != WL_CONNECTED)
       {
+        lcd.setCursor(0,0);
+        lcd.print("Wifi isn't contected"); 
         Serial.println("Wifi isn't contected");
         WiFi.reconnect();
       }
