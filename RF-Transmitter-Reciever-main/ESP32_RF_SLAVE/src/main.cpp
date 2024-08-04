@@ -84,7 +84,7 @@ byte WifiStatus = E_NOT_OK;
 byte ModbusStatus = E_NOT_OK;
 int timeValue;
 int LCDCount = 0;
-String FirmwareVer = "4.8.4.19";
+String FirmwareVer = "4.8.4.29";
 uint8_t Status[NUMBER_OF_STATION] = {0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 int hourSetRTC, minSetRTC, secSetRTC, daySetRTC, monthSetRTC, yearSetRTC;
 uint16_t TimeGet[NUMBER_OF_DATA];
