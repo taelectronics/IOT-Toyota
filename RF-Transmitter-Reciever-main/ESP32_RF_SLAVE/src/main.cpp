@@ -62,7 +62,8 @@ Preferences preferences;
 #define DOWNBUTTON 22
 #define SELECT_FIREBASE 12
 #define SELECT_RTC 4
-
+#define NUMBER_OF_STATION 25
+#define NUMBER_OF_DATA 27
 // Khởi tạo Firebase
 FirebaseData firebaseDataPrimary;
 FirebaseAuth firebaseAuthPrimary;
@@ -82,14 +83,16 @@ byte StationValue = 2;
 byte WifiStatus = E_NOT_OK;
 byte ModbusStatus = E_NOT_OK;
 int timeValue;
-String FirmwareVer = "31.7.18.22";
-uint8_t Status[20] = {0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-uint8_t Status_Firebase[20] = {0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+int LCDCount = 0;
+String FirmwareVer = "4.8.4.19";
+uint8_t Status[NUMBER_OF_STATION] = {0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 int hourSetRTC, minSetRTC, secSetRTC, daySetRTC, monthSetRTC, yearSetRTC;
-uint16_t TimeGet[27];
+uint16_t TimeGet[NUMBER_OF_DATA];
 byte DayStatus = E_NOT_OK;
+byte SendIP = E_NOT_OK;
+String IPPath = "/Station/IP/";
 String stationPath = "/Station/Status/";
-String StationName[20] = {"S00", "S01", "S02", "S03", "S04", "S05", "S06", "S07", "S08", "S09", "S10", "S11", "S12", "S13", "S14", "S15", "S16", "S17", "S18", "S19"};
+String StationName[NUMBER_OF_STATION] = {"S00", "S01", "S02", "S03", "S04", "S05", "S06", "S07", "S08", "S09", "S10", "S11", "S12", "S13", "S14", "S15", "S16", "S17", "S18", "S19","S20", "S21","S22", "S23", "S24"};
 String ROMData = "";
 String data_Firebase_Compare;
 byte Primary_Get = E_NOT_OK;
@@ -171,12 +174,10 @@ void setup()
   // Cấu hình Firebase
   firebaseConfigPrimary.host = FIREBASE_HOST_PRIMARY;
   firebaseConfigPrimary.signer.tokens.legacy_token = FIREBASE_AUTH_PRIMARY;
-  firebaseConfigPrimary.timeout.serverResponse = 5 * 1000; // 10 giây
 
   // Cấu hình Firebase Backup
   firebaseConfigBackup.host = FIREBASE_HOST_BACKUP;
   firebaseConfigBackup.signer.tokens.legacy_token = FIREBASE_AUTH_BACKUP;
-  firebaseConfigBackup.timeout.serverResponse = 5 * 1000; // 10 giây
 
   // Kết nối Firebase
   Firebase.begin(&firebaseConfigPrimary, &firebaseAuthPrimary);
@@ -223,6 +224,35 @@ void setup()
 
 void loop()
 {
+
+  String IPAddress;
+  IPAddress =  WiFi.localIP().toString();
+  if(IPAddress == "")
+  {
+    IPAddress = "0.0.0.0";
+  }
+  if(SendIP == E_NOT_OK)
+  {
+    Firebase.begin(&firebaseConfigPrimary, &firebaseAuthPrimary);
+    if (Firebase.setString(firebaseDataPrimary, IPPath.c_str() + StationName[StationValue], IPAddress))
+    {
+      Serial.println("Ghi IP OK");
+    }
+    else
+    {
+      Serial.println("Gghi IP ");
+    }
+  }
+
+
+  if(LCDCount > 1000)
+  {
+    lcd.clear();
+    lcd.getWriteError();
+    lcd.clearWriteError();
+    lcd.begin(16,2);
+    LCDCount = 0;
+  }
   if(SetTimeRTC == E_NOT_OK)
   {
     if(CalculateTimeValue() != (-1))
@@ -250,11 +280,11 @@ void loop()
       {
         Serial.println("Get Primary Firebase successful");
         Serial.println("Data: " + data_Firebase);
-        stringToArray(data_Firebase, TimeGet, 27);
+        stringToArray(data_Firebase, TimeGet, NUMBER_OF_DATA);
         Serial.println();
         if(compareStrings(data_Firebase_Compare,data_Firebase) == false)
         {
-          writeArrayToEEPROM(0,TimeGet,27);
+          writeArrayToEEPROM(0,TimeGet,NUMBER_OF_DATA);
           lcd.setCursor(0,0);
           lcd.print("Saved to ROM      ");
           Serial.println("Saved to ROM");
@@ -309,10 +339,10 @@ void loop()
         {
           Serial.println("Get Backup Firebase successful");
           Serial.println("Data: " + data_Firebase);
-          stringToArray(data_Firebase, TimeGet, 27);
+          stringToArray(data_Firebase, TimeGet, NUMBER_OF_DATA);
           if(compareStrings(data_Firebase_Compare,data_Firebase) == false)
           {
-            writeArrayToEEPROM(0,TimeGet,27);
+            writeArrayToEEPROM(0,TimeGet, NUMBER_OF_DATA);
             lcd.setCursor(0,0);
             lcd.print("Saved to ROM     ");
             Serial.println("Saved to ROM");
@@ -820,7 +850,7 @@ int CalculateTimeValue()
 void ProcessOutput()
 {
 
-    if(Status[StationValue] == 0x00)
+    if(Status[StationValue] == 1)
     {
       digitalWrite(OUTPUT1,LOW);
     }
@@ -838,7 +868,7 @@ void ReadFromRom()
     StationValue = (byte)(getStringBetween(ROMData, "*", 1).toInt());
     Serial.println("Read from ROM:");
     Serial.print("Station: "); Serial.println(StationValue);
-    if((StationValue > 19) || (StationValue <1)) StationValue = 1;
+    if((StationValue > 24) || (StationValue <1)) StationValue = 1;
       lcd.clear();
       lcd.setCursor(0, 0);
       lcd.print("Wifi:");
@@ -902,41 +932,6 @@ String replaceFirstStringWithNumber(String originalString, int number)
   return newString;
 }
 
-void sendIPtoFirebase()
-{
-  if((Status[StationValue] & 0x04))
-  {
-    if (Firebase.ready())
-    {
-      String IPString;
-      if (WiFi.status() == WL_CONNECTED) 
-      {
-        IPAddress ip = WiFi.localIP();
-        IPString = ip.toString();
-      } 
-      if (Firebase.setString(firebaseDataPrimary, stationPath.c_str() + StationName[StationValue], IPString.c_str()))
-      {
-        Serial.print("Write Successfully to The Primary Firebase: ");
-      }
-      else
-      {
-        Serial.println("Failed to Write Primary Firebase: "); 
-        Serial.println(firebaseDataPrimary.errorReason());
-      }
-      WifiStatus = E_OK;
-    }
-    else
-    {
-      Serial.println("Firebase is not ready");
-      if (WiFi.status() != WL_CONNECTED)
-      {
-        WifiStatus = E_NOT_OK;
-        Serial.println("Wifi isn't contected");
-        WiFi.reconnect();
-      }
-    }
-  }
-}
 
 void InitRTC()
 {
@@ -947,12 +942,16 @@ void InitRTC()
   if (!rtc.begin()) 
   {
     Serial.println("Couldn't find RTC");
+    lcd.setCursor(0,0);
+    lcd.print("Couldn't find RTC   ");
   }
 
   // Kiểm tra xem RTC có đang chạy không
   if (!rtc.isrunning()) 
   {
     Serial.println("RTC is NOT running!");
+    lcd.setCursor(0,0);
+    lcd.print("RTC is NOT running!    ");
     // Thiết lập thời gian ban đầu cho RTC
     // Chỉ cần thực hiện điều này một lần
     rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
@@ -983,13 +982,21 @@ void ProcessRTC()
   Serial.print(" Value:");
   Serial.println(TimeGet[20 + DayOfWeekCalculate]);
   
-  if(TimeGet[20 + DayOfWeekCalculate] != 0x00)
+  if((TimeGet[20 + DayOfWeekCalculate] && 0x01) || (TimeGet[20 + DayOfWeekCalculate] && 0x02))
   {
     DayStatus = E_OK;
   }
   else
   {
     DayStatus = E_NOT_OK;
+  }
+  if(TimeGet[20 + DayOfWeekCalculate] && 0x04)
+  {
+    SendIP = E_NOT_OK;
+  }
+  else
+  {
+    SendIP = E_OK;
   }
   if((true == checkArray(TimeGetRTC, timeValueRTC)) && (DayStatus == E_OK))
   {
@@ -1141,4 +1148,5 @@ void IRAM_ATTR onTimer(void* arg) {
     ProcessOutput();
     // Khởi động lại timer
     esp_timer_start_once(timer, 1000000); // 1 giây
+    LCDCount++;
 }

@@ -1,4 +1,3 @@
-#include <RH_ASK.h>
 #include <WiFi.h>
 #include <FirebaseESP32.h>
 #include <ModbusMaster.h>
@@ -7,12 +6,10 @@
 #include <HTTPUpdate.h>
 #include <WiFiClientSecure.h>
 #include <cert.h>
-#include <NTPClient.h>
 #include <WiFiUdp.h>
 #include <Preferences.h>
 #include <LiquidCrystal.h>
 #include "time.h"
-#include <SPI.h>
 #include "esp_task_wdt.h"
 // Thông tin máy chủ NTP
 const char* ntpServer = "pool.ntp.org";
@@ -21,12 +18,6 @@ const int   daylightOffset_sec = 0;
 
 // Thời gian chờ của watchdog (giây)
 #define WATCHDOG_TIMEOUT_S 300
-
-// Khởi tạo đối tượng WiFiUDP để giao tiếp với NTP
-WiFiUDP ntpUDP;
-
-// Khởi tạo đối tượng NTPClient với múi giờ Việt Nam (GMT+7) và cập nhật mỗi 1 giây
-NTPClient timeClient(ntpUDP, "pool.ntp.org", 7*3600, 10000);  // GMT+7, cập nhật mỗi 1 giây
 
 //Khởi tạo với các chân LCD
 LiquidCrystal lcd(14, 27, 26, 25, 33, 32);
@@ -42,9 +33,10 @@ HardwareSerial SerialModbus(2);
 #define RS485_RXD2 16  // GPIO16, UART2 RXD
 #define RS485_TXD2 17  // GPIO17, UART2 TXD
 #define RS485_TX_ENABLE 18  // GPIO18, UART2 TX enable
-#define SELECT_FIREBASE_PRIMARY 34
+#define E_STOP_BUTTON 4
 #define SELECT_FIREBASE_BACKUP 35
-#define RFPin 19
+#define NUMBER_OF_STATION 25
+
 // ModbusMaster object
 ModbusMaster node;
 // Define Modbus slave ID and register ranges
@@ -76,37 +68,43 @@ FirebaseConfig firebaseConfigBackup;
 String wifi_ssid = "CKA Automation";
 String wifi_password = "cka12345";
 byte WifiStatus;
-int TimeSendRF;
+byte FinishtoClear = E_NOT_OK;
 // Example arrays
-byte modbusStatus = E_NOT_OK;
-byte StationValue;
-byte Firebase_Backup_Status = E_NOT_OK;
-byte Firebase_Primary_Status = E_NOT_OK;
-byte SetTimeHMI = E_NOT_OK;
-int hourGet = 0, minGet = 0 , secGet = 0;
-uint16_t HMITime[2];
-uint16_t timeValue;
-uint16_t TimeGet[40] = {};
-uint16_t HMIDayOfWeek[140];
-uint16_t HMIDayOfWeekCompare[140];
-uint16_t TimeProcessed[20][20];
-uint16_t TimeCompare[20][20];
-uint16_t SettingParametter[80];
-String StationName[20] = {"/S00", "/S01", "/S02", "/S03", "/S04", "/S05", "/S06", "/S07", "/S08", "/S09", "/S10", "/S11", "/S12", "/S13", "/S14", "/S15", "/S16", "/S17", "/S18", "/S19"};
-String FirmwareVer = "31.7.18.22";
-byte Status[20] = {0x0F, 0x0F, 0x0F, 0x0F,0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F};
-byte Firebase_Primary_Set[20] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
-byte Firebase_Backup_Set[20] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
-String stationStatusPath = "/Station/Status";
+static byte modbusStatus = E_NOT_OK;
+static byte StationValue;
+static byte Firebase_Backup_Status = E_NOT_OK;
+static byte Firebase_Primary_Status = E_NOT_OK;
+static byte SetTimeHMI = E_NOT_OK;
+static int hourGet = 0, minGet = 0 , secGet = 0;
+static int dayGet = 0, monthGet = 0 , yearGet = 0, dayOfweekGet  = 0, dayOfweekProcessed = 0;
+static uint16_t HMITime[7];
+static uint16_t timeValue;
+static uint16_t TimeGet[40] = {};
+volatile uint16_t DayOfWeekToday[NUMBER_OF_STATION];
+static uint16_t HMIDayOfWeek[NUMBER_OF_STATION*7];
+static uint16_t HMIDayOfWeekCompare[NUMBER_OF_STATION*7];
+static uint16_t TimeProcessed[NUMBER_OF_STATION][20];
+static uint16_t TimeCompare[NUMBER_OF_STATION][20];
+static uint16_t IPNumberArray[NUMBER_OF_STATION*4];
+static uint16_t SettingParametter[80];
+static uint16_t StationStatus[NUMBER_OF_STATION];
+static byte CountNumber = 0;
+String StationName[NUMBER_OF_STATION] = {"S00", "S01", "S02", "S03", "S04", "S05", "S06", "S07", "S08", "S09", "S10", "S11", "S12", "S13", "S14", "S15", "S16", "S17", "S18", "S19", "S20", "S21", "S22", "S23", "S24"};
+String FirmwareVer = "4.8.4.19";
+byte Firebase_Primary_Set[NUMBER_OF_STATION] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
+byte Firebase_Backup_Set[NUMBER_OF_STATION] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
+String stationStatusPath = "/Station/Status/";
+String stationIPPath = "/Station/IP/";
 String stationDayofWeekPath = "/Station/DayofWeek";
 String ROMData = "";
 String data_Firebase;
-String convertStatusArrayToString(byte arr[20], int inputSize);
+uint8_t  IPNumber[4];
+
+byte WriteIP = E_NOT_OK;
 void reduceArray(const uint16_t inputArray[], uint16_t outputArray[],  int inputSize);
 bool readRegisters(uint16_t startReg, uint16_t count, uint16_t* values);
 void firmwareUpdate();
 int FirmwareVersionCheck(void);
-bool checkTimeRange(uint16_t timeArray[], uint16_t arraySize, uint16_t timenow);
 void writeStringToROM(String myString);
 String readStringFromROM();
 String receiveStringFromSerial();
@@ -120,13 +118,18 @@ bool compareStrings(String str1, String str2);
 void preTransmission();
 void postTransmission();
 String arrayToString(uint16_t arr[], int size);
-void sendRF();
 void screen1();
 bool ReadTimeFromHMI();
 void ReadFromRom();
 bool ReadDayOfWeekFromHMI(uint16_t startAddress);
 bool ReadSettingParam(uint16_t startAddress);
 String convertArrayToString(uint16_t arr[], int length, int startIndex, int numElements);
+void parseIP(const String& ipStr, uint8_t ipArray[4]);
+void readIPAddress();
+bool WriteIPAddressToHMI(uint16_t startAddress, uint16_t count, uint16_t* inputArray) ;
+bool WriteStatusToHMI(uint16_t startAddress, uint16_t count);
+bool checkArray(uint16_t arr[], uint16_t a);
+int getDayOfWeek(int day, int month, int year);
 void setup() {
   Serial.begin(115200);
   delay(10);
@@ -139,9 +142,6 @@ void setup() {
   lcd.print("Wifi: "); lcd.print(wifi_ssid);
   // Đọc chuỗi từ ROM và hiển thị lên Serial
   ReadFromRom();
-  // Cấu hình Firebase
-  pinMode(RFPin,OUTPUT);
-  digitalWrite(RFPin,HIGH);
   firebaseConfigPrimary.host = FIREBASE_HOST_PRIMARY;
   firebaseConfigPrimary.signer.tokens.legacy_token = FIREBASE_AUTH_PRIMARY;
   // firebaseConfigPrimary.timeout.serverResponse = 1000;
@@ -180,24 +180,26 @@ void setup() {
   {
     firmwareUpdate();
   }
-  pinMode(SELECT_FIREBASE_PRIMARY, INPUT_PULLUP);
-  pinMode(SELECT_FIREBASE_BACKUP,INPUT_PULLUP);
   // Khởi tạo watchdog
   esp_task_wdt_init(WATCHDOG_TIMEOUT_S, true);
-
+  pinMode(E_STOP_BUTTON, INPUT_PULLUP);
 }
 int count;
 int firstTime = 0;
 void loop()
 {
-  
+  // if(digitalRead(E_STOP_BUTTON)==HIGH)
+  // {
+  //   lcd.setCursor(0,0);
+  //   lcd.print("Emergency Stop");
+  // }
   if((false == ReadTimeFromHMI())||(SetTimeHMI == E_NOT_OK))
   {
     printLocalTime();
   }
   if(true == ReadDayOfWeekFromHMI(200))
   {
-    for(int i = 7; i<140; i++)
+    for(int i = 7; i<(NUMBER_OF_STATION*7); i++)
     {
       if(HMIDayOfWeekCompare[i] != HMIDayOfWeek[i])
       {
@@ -205,11 +207,12 @@ void loop()
       Firebase_Backup_Set[i/7] = E_NOT_OK;
       }
     }
-    for (int i = 0; i<140; i++)
+    for (int i = 0; i < (NUMBER_OF_STATION*7); i++)
     {
       HMIDayOfWeekCompare[i] = HMIDayOfWeek[i];
     }
     modbusStatus = E_OK;
+    dayOfweekProcessed = getDayOfWeek(dayGet,monthGet,yearGet);
   }
   else
   {
@@ -223,7 +226,7 @@ void loop()
     if(SettingParametter[0]==1)
     {
       Serial.println("Manual Mode");
-      for(int i = 1; i<20; i++)
+      for(int i = 1; i< NUMBER_OF_STATION; i++)
       {
         if(SettingParametter[i] == 1)
         {
@@ -243,16 +246,56 @@ void loop()
         Firebase_Backup_Set[i] = E_NOT_OK;
       }
     }
+    if(SettingParametter[30]==1)
+    {
+      Firebase.begin(&firebaseConfigPrimary, &firebaseAuthPrimary);
+      delay(50);
+      if (FinishtoClear == E_NOT_OK)
+      {
+        if(Firebase.deleteNode(firebaseDataPrimary,stationIPPath))
+        {
+          Serial.println("Finished to Clear");
+          FinishtoClear = E_OK;
+        }
+      }
+      for(int Index = 0; Index < NUMBER_OF_STATION*7; Index++)
+      {
+        HMIDayOfWeek[Index] |= 0x04;
+      }
+      for(int i = 0 ; i < NUMBER_OF_STATION; i++)
+      {
+        Firebase_Primary_Set[i] = E_NOT_OK;
+      }
+
+      WriteIP = E_NOT_OK;
+      CountNumber = 0;
+    }
+    else
+    {
+      Serial.println("Don't update");
+      FinishtoClear = E_NOT_OK;
+      WriteIP = E_OK;
+    }
+    modbusStatus = E_OK;
   }
-  for(int i = 0; i<140; i++)
+  else
   {
-    Serial.print(HMIDayOfWeek[i]);
-    Serial.print(" ");
+    modbusStatus = E_NOT_OK;
   }
+  // if(digitalRead(E_STOP_BUTTON)==HIGH)
+  // {
+  //   for(int i = 0; i < NUMBER_OF_STATION*7; i++)
+  //   {
+  //     HMIDayOfWeek[i] = 0x00;
+  //   }
+  // }
+
+
+
   esp_task_wdt_reset();
   SettingbySoftware();
   screen1();
-  for(int RowIndex = 0; RowIndex < 20; RowIndex++)
+  for(int RowIndex = 0; RowIndex < NUMBER_OF_STATION; RowIndex++)
   {
     for(int ColIndex = 0; ColIndex <20; ColIndex++)
     {
@@ -260,7 +303,7 @@ void loop()
     }
   }
   esp_task_wdt_reset();
-  for (uint16_t i = 1; i < 20; i++)
+  for (uint16_t i = 1; i < NUMBER_OF_STATION; i++)
   {
     if (true == readRegisters(1000+i*40, 40, TimeGet))
     {
@@ -269,7 +312,7 @@ void loop()
       delay(10);
     }
   }
-  for(int RowIndex = 1; RowIndex < 20; RowIndex++)
+  for(int RowIndex = 1; RowIndex < NUMBER_OF_STATION; RowIndex++)
   {
     for(int ColIndex = 0; ColIndex <20; ColIndex++)
     {
@@ -281,7 +324,7 @@ void loop()
       }
     }
   }
-for( int Num = 1; Num < 20; Num++)
+for( int Num = 1; Num < NUMBER_OF_STATION; Num++)
 {
   if((Firebase_Primary_Set[Num] == E_NOT_OK))
   {
@@ -291,22 +334,21 @@ for( int Num = 1; Num < 20; Num++)
   }
 }
 
-for( int Num = 1; Num < 20; Num++)
+for( int Num = 1; Num < NUMBER_OF_STATION; Num++)
 {
-  if((Firebase_Primary_Set[Num] == E_NOT_OK))
+  if((Firebase_Primary_Set[Num] == E_NOT_OK) && (modbusStatus == E_OK))
   { 
     esp_task_wdt_reset();
     // Lựa chọn sử dụng DataBase Primary
     if (Firebase.ready())
     {
-
       data_Firebase = arrayToString(TimeProcessed[Num], 20);
-      data_Firebase += convertArrayToString(HMIDayOfWeek, 140, Num*7, 7);
+      data_Firebase += convertArrayToString(HMIDayOfWeek, NUMBER_OF_STATION*7, Num*7, 7);
       if (Firebase.setString(firebaseDataPrimary, stationStatusPath.c_str() + StationName[Num], data_Firebase.c_str()))
       {
         lcd.setCursor(0,0);
         lcd.print("PRI "); lcd.print(Num);
-        lcd.print(": OK");
+        lcd.print(": OK    ");
         Serial.print("Write Successfully to The Primary Firebase: ");Serial.println(Num);
         Firebase_Primary_Set[Num] = E_OK;
       }
@@ -314,12 +356,14 @@ for( int Num = 1; Num < 20; Num++)
       {
         lcd.setCursor(0,0);
         lcd.print("PRI "); lcd.print(Num);
-        lcd.print(": ERROR");
+        lcd.print(": ERROR    ");
         Firebase_Primary_Set[Num] = E_NOT_OK;
         Serial.println("Failed to Write Primary Firebase: "); Serial.println(Num);
         Serial.println(firebaseDataPrimary.errorReason());
       }
+
       Serial.println(data_Firebase);
+      // Firebase.setString(firebaseDataPrimary, stationIPPath.c_str() + StationName[Num], "192.168.1.2");
       WifiStatus = E_OK;
     }
     else
@@ -334,11 +378,12 @@ for( int Num = 1; Num < 20; Num++)
         Serial.println("Wifi isn't contected");
         WiFi.reconnect();
       }
+      delay(1000);
     }
-  delay(1000);
+  delay(100);
   }
 }
-for( int Num = 1; Num < 20; Num++)
+for( int Num = 1; Num < NUMBER_OF_STATION; Num++)
 {
   if((Firebase_Backup_Set[Num] == E_NOT_OK))
   {
@@ -348,15 +393,15 @@ for( int Num = 1; Num < 20; Num++)
   }
 }
   // Lựa chọn sử dụng DataBase Backup
-for( int Num = 1; Num < 20; Num++)
+for( int Num = 1; Num < NUMBER_OF_STATION; Num++)
 {
-  if((Firebase_Backup_Set[Num] == E_NOT_OK))
+  if((Firebase_Backup_Set[Num] == E_NOT_OK) && (modbusStatus == E_OK))
   {
     esp_task_wdt_reset();
     if (Firebase.ready())
     {
       data_Firebase = arrayToString(TimeProcessed[Num], 20);
-      data_Firebase += convertArrayToString(HMIDayOfWeek, 140, Num*7, 7);
+      data_Firebase += convertArrayToString(HMIDayOfWeek, NUMBER_OF_STATION*7, Num*7, 7);
       if (Firebase.setString(firebaseDataBackup, stationStatusPath.c_str() + StationName[Num] , data_Firebase.c_str()))
       {
         lcd.setCursor(0,0);
@@ -389,24 +434,89 @@ for( int Num = 1; Num < 20; Num++)
         lcd.print("Wifi isn't contected"); 
         Serial.println("Wifi isn't contected");
         WiFi.reconnect();
+        delay(1000);
       }
     }
-  delay(1000);
+  delay(100);
   } 
 }
 
+Firebase.begin(&firebaseConfigPrimary, &firebaseAuthPrimary);
+if (WriteIP == E_NOT_OK)
+{
+  for( int Num = 1; Num < NUMBER_OF_STATION; Num++)
+  {
+    String result = "";
+    Serial.print("GetIP:"); Serial.println(Num);
+    // Lấy dữ liệu từ Firebase
+    if (Firebase.getString(firebaseDataPrimary, (stationIPPath + StationName[Num]).c_str())) 
+    {
+        result = firebaseDataPrimary.stringData();
+        parseIP(result, IPNumber);
+        
+        for(int i = 0; i<4; i++)
+        {
+          IPNumberArray[Num*4+i] = IPNumber[i];
+        }
+    } 
+    else 
+    {
+      for(int i = 0; i<4; i++)
+      {
+        IPNumberArray[Num*4+i] = 0;
+      }
+      Serial.println("Failed to get data from Firebase");
+      Serial.println("Reason: " + firebaseDataPrimary.errorReason());
+    }
+  }
 }
 
-String convertStatusArrayToString(byte arr[], int inputSize) {
-  String result = "";
-  for (int i = 0; i < inputSize; i++) {
-    if (arr[i] < 10) 
-    {
-      result += "0"; // Đảm bảo tất cả các số đều có hai chữ số
-    }
-    result += String(arr[i], DEC); // Chuyển từng phần tử byte thành chuỗi số thập phân
+  // && (DayOfWeekToday[Num] != 0x00) 
+  for (uint16_t Index = 1; Index < NUMBER_OF_STATION; Index++)
+  {
+      if( (true == checkArray(TimeProcessed[Index], timeValue)) && (HMIDayOfWeek[ Index*7 + dayOfweekProcessed] != 0x00))
+      {
+        StationStatus[Index] = 1;
+      }
+      else
+      {
+        StationStatus[Index] = 0;
+      }
+      if (CountNumber == 1)
+      {
+        IPNumberArray[Index] = StationStatus[Index];
+      }
+      Serial.print("-");
+      Serial.print(StationStatus[Index]);
+      Serial.print(" ");
   }
-  return result;
+
+  Serial.println(dayOfweekProcessed);
+
+  if (CountNumber == 0)
+  {
+    if(WriteIPAddressToHMI(600, NUMBER_OF_STATION*4, IPNumberArray))
+    {
+      Serial.println("Write IP Successfully");
+    }
+    else
+    {
+      Serial.println("Fail to Write IP");
+    }
+  }
+  else
+  {
+    if(WriteIPAddressToHMI(700, NUMBER_OF_STATION, IPNumberArray))
+    {
+      Serial.println("Write Status Successfully");
+    }
+    else
+    {
+      Serial.println("Fail to Write IP");
+    }
+  }
+  CountNumber++;
+  if(CountNumber > 1) CountNumber = 1;
 }
 
 
@@ -426,7 +536,7 @@ bool readRegisters(uint16_t startReg, uint16_t count, uint16_t* values)
 bool ReadTimeFromHMI()
 {
   bool result;
-  result = readRegisters(9017, 3, HMITime);
+  result = readRegisters(9017, 7, HMITime);
   if(result == true)
   {
     timeValue = HMITime[2]*60 + HMITime[1];
@@ -436,6 +546,9 @@ bool ReadTimeFromHMI()
   hourGet = (int)HMITime[2];
   minGet = (int)HMITime[1];
   secGet = (int)HMITime[0];
+  dayGet = (int)HMITime[3];
+  monthGet = (int)HMITime[4];
+  yearGet = (int)HMITime[5];
   return result;
 }
 
@@ -464,7 +577,7 @@ String convertArrayToString(uint16_t arr[], int length, int startIndex, int numE
 bool ReadSettingParam(uint16_t startAddress)
 {
   bool result;
-  result = readRegisters(startAddress, 80, SettingParametter);
+  result = readRegisters(startAddress, 64, SettingParametter);
   if(result == false)
   {
     Serial.println("Modbus Fail 1");
@@ -476,22 +589,38 @@ bool ReadSettingParam(uint16_t startAddress)
 bool ReadDayOfWeekFromHMI(uint16_t startAddress)
 {
   bool result;
-  uint16_t HMIDayOfWeekStub[70];
-  result = readRegisters(startAddress, 70, HMIDayOfWeek);
+  uint16_t HMIDayOfWeekStub[60];
+  result = readRegisters(startAddress, 60, HMIDayOfWeekStub);
   if(result == false)
   {
     Serial.println("Modbus Fail 1");
     return result;
   }
-  result = readRegisters(startAddress+70, 70, HMIDayOfWeekStub);
+  for( int i = 0; i < 60; i++)
+  {
+    HMIDayOfWeek[i] = HMIDayOfWeekStub[i];
+  }
+
+  result = readRegisters(startAddress+60, 60, HMIDayOfWeekStub);
   if(result == false)
   {
     Serial.println("Modbus Fail 2");
     return result;
   }
-  for(int i = 0; i < 70; i++)
+  for(int i = 60; i < 120; i++)
   {
-    HMIDayOfWeek[70+i] = HMIDayOfWeekStub[i];
+    HMIDayOfWeek[i] = HMIDayOfWeekStub[i-60];
+  }
+    
+  result = readRegisters(startAddress + 120, 60, HMIDayOfWeekStub);
+  if(result == false)
+  {
+    Serial.println("Modbus Fail 3");
+    return result;
+  }
+  for(int i = 120; i < NUMBER_OF_STATION*7; i++)
+  {
+    HMIDayOfWeek[i] = HMIDayOfWeekStub[i-120];
   }
   /*
   for(int i = 0; i < 140; i++)
@@ -606,17 +735,6 @@ void reduceArray(const uint16_t inputArray[], uint16_t outputArray[],  int input
     {
         outputArray[i] = inputArray[2 * i] * 60 + inputArray[2 * i + 1];
     }
-}
-
-bool checkTimeRange(uint16_t timeArray[], uint16_t arraySize, uint16_t timenow) {
-    for (int i = 0; i < arraySize; i += 2) {
-        uint16_t startTime = timeArray[i];
-        uint16_t endTime = timeArray[i + 1];
-        if (timenow >= startTime && timenow < endTime) {
-            return true;
-        }
-    }
-    return false;
 }
 
 void writeStringToROM(String myString) {
@@ -796,6 +914,9 @@ void printLocalTime()
   hourGet = timeinfo.tm_hour;
   minGet = timeinfo.tm_min;
   secGet = timeinfo.tm_sec;
+  dayGet = timeinfo.tm_mday;
+  monthGet = timeinfo.tm_mon;
+  yearGet = timeinfo.tm_year;
   timeValue = timeinfo.tm_hour*60 + timeinfo.tm_min;
   if(SetTimeHMI == E_NOT_OK)
   {
@@ -804,6 +925,9 @@ void printLocalTime()
     node.setTransmitBuffer(0, secGet); // Giá trị 0x1234 vào thanh ghi đầu tiên
     node.setTransmitBuffer(1, minGet); // Giá trị 0x5678 vào thanh ghi thứ hai
     node.setTransmitBuffer(2, hourGet); // Giá trị 0x9ABC vào thanh ghi thứ ba
+    // node.setTransmitBuffer(3, dayGet); // Giá trị 0x1234 vào thanh ghi đầu tiên
+    // node.setTransmitBuffer(4, monthGet); // Giá trị 0x5678 vào thanh ghi thứ hai
+    // node.setTransmitBuffer(5, yearGet); // Giá trị 0x9ABC vào thanh ghi thứ ba
     uint8_t result = node.writeMultipleRegisters(startAddress, 3);
       // Kiểm tra kết quả
     if (result == node.ku8MBSuccess) {
@@ -946,4 +1070,126 @@ void ReadFromRom()
     DataToWrite = "*" + String(StationValue) + "*" + wifi_ssid + "*" +  wifi_password + "*";
     writeStringToROM(DataToWrite);
   }
+}
+
+// Hàm tách chuỗi IP thành 4 số và lưu vào mảng ipArray
+void parseIP(const String& ipStr, uint8_t ipArray[4]) {
+  int partIndex = 0;  // Chỉ số của phần hiện tại trong IP (0 đến 3)
+  
+  // Tạo bản sao của chuỗi IP để xử lý
+  String ipCopy = ipStr;
+  int startIndex = 0;
+  int endIndex = ipCopy.indexOf('.'); // Tìm dấu chấm đầu tiên
+
+  // Lặp qua các phần của chuỗi IP
+  while (endIndex != -1 && partIndex < 4) {
+    ipArray[partIndex++] = ipCopy.substring(startIndex, endIndex).toInt();  // Lấy phần và chuyển đổi thành số nguyên
+    startIndex = endIndex + 1; // Cập nhật chỉ số bắt đầu cho phần tiếp theo
+    endIndex = ipCopy.indexOf('.', startIndex); // Tìm dấu chấm tiếp theo
+  }
+  
+  // Xử lý phần cuối cùng của chuỗi IP (không có dấu chấm sau nó)
+  if (partIndex < 4) {
+    ipArray[partIndex++] = ipCopy.substring(startIndex).toInt();
+  }
+
+  // Nếu chuỗi IP không hợp lệ (không đủ 4 phần), đặt tất cả các phần còn lại thành 0
+  while (partIndex < 4) {
+    ipArray[partIndex++] = 0;
+  }
+}
+
+bool WriteIPAddressToHMI(uint16_t startAddress, uint16_t count, uint16_t* inputArray) {
+  // Kiểm tra xem inputArray có đủ phần tử không
+  if (inputArray == nullptr) {
+    Serial.println("Invalid inputArray pointer");
+    return false;
+  }
+
+  // Ghi nhiều thanh ghi
+  for (int i = 0; i < count; i++) {
+    node.setTransmitBuffer(i, inputArray[i]); // Ghi giá trị từ inputArray vào thanh ghi
+  }
+
+  // In ra các giá trị của inputArray để kiểm tra
+  Serial.print("Input Array: ");
+  for (int i = 0; i < count; i++) {
+    Serial.print(i + startAddress);
+    Serial.print("-");
+    Serial.print(inputArray[i]);
+    Serial.print(" ");
+  }
+  Serial.println();
+
+  // Kiểm tra xem lệnh ghi có thành công không
+  uint8_t result = node.writeMultipleRegisters(startAddress, count);
+
+  // Kiểm tra kết quả của quá trình ghi
+  if (result == node.ku8MBSuccess) {
+    Serial.println("Write Modbus Successfully");
+    return true;
+  } else {
+    Serial.print("Error: ");
+    Serial.println(result);
+    return false;
+  }
+}
+
+
+bool WriteStatusToHMI(uint16_t startAddress, uint16_t count) {
+  // Ghi nhiều thanh ghi
+  for(int Index = 0; Index < count; Index++)
+  {
+    node.setTransmitBuffer(Index, StationStatus[Index]); // Ghi giá trị 0x1234 vào thanh ghi 0
+  }
+  // for(int i = 0; i < count; i++)
+  // {
+  //   Serial.print(IPNumberArray[i]);Serial.print(" ");
+  // }
+  // Serial.println(" ");
+  // Kiểm tra xem lệnh ghi có thành công không
+  uint8_t result = node.writeMultipleRegisters(startAddress, count);
+
+  // Kiểm tra kết quả của quá trình ghi
+  if (result == node.ku8MBSuccess) 
+  {
+    return true;
+  } 
+  else 
+  {
+    Serial.println(result);
+    return false;
+  }
+  
+}
+
+bool checkArray(uint16_t arr[], uint16_t a) {
+    for (int i = 0; i < 20; i += 2) {
+        if (i + 1 < 20) {  // Đảm bảo không vượt quá giới hạn của mảng
+            if (a >= arr[i] && a < arr[i + 1]) {
+                return true;  // Trả về 1 nếu điều kiện thỏa mãn
+            }
+        }
+    }
+    return false;  // Trả về 0 nếu không có cặp nào thỏa mãn điều kiện
+}
+
+int getDayOfWeek(int day, int month, int year) {
+    // Điều chỉnh tháng và năm nếu tháng là January hoặc February
+    if (month < 3) 
+    {
+        month += 12;
+        year -= 1;
+    }
+
+    int k = year % 100; // Hai chữ số cuối của năm
+    int j = year / 100; // Hai chữ số đầu của năm
+
+    // Công thức Zeller’s Congruence
+    int dayOfWeek = (day + 13 * (month + 1) / 5 + k + k / 4 + j / 4 - 2 * j) % 7;
+
+    // Điều chỉnh giá trị trả về để thứ Hai là 0, Chủ Nhật là 6
+    dayOfWeek = (dayOfWeek + 5) % 7;
+
+    return dayOfWeek;
 }
