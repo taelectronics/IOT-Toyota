@@ -142,6 +142,10 @@ void setup() {
   lcd.begin(16, 2);
   lcd.clear();
   lcd.clearWriteError();
+  lcd.setCursor(0,0);
+  lcd.print("V:");
+  lcd.print(FirmwareVer);
+  Serial.print("V:"); Serial.println(FirmwareVer);
   // Đọc chuỗi từ ROM và hiển thị lên Serial
   ReadFromRom();
 
