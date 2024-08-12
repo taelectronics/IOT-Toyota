@@ -72,8 +72,8 @@ FirebaseData firebaseDataBackup;
 FirebaseAuth firebaseAuthBackup;
 FirebaseConfig firebaseConfigBackup;
 
-String wifi_ssid = "CKA Automation";
-String wifi_password = "cka12345";
+String wifi_ssid = "TBHN employees";
+String wifi_password = "Tbhn@2022";
 
 // Example arrays
 volatile int DayOfWeekCalculate;
@@ -627,6 +627,7 @@ boolean ConnectToWifi(byte retry)
     Serial.println(wifi_password);
     for(int i=0; i<retry;i++)
     {
+      SettingbySoftware();
       if (WiFi.status() == WL_CONNECTED)
       {
         Serial.println("Connecting is successfully");
