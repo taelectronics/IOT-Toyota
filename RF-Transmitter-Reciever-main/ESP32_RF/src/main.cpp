@@ -15,7 +15,8 @@
 const char* ntpServer = "pool.ntp.org";
 const long  gmtOffset_sec = 7 * 3600; // GMT+7 (Giờ Việt Nam)
 const int   daylightOffset_sec = 0;
-
+int ScanDevice = 0;
+int TimeScanDevice = 0;
 // Thời gian chờ của watchdog (giây)
 #define WATCHDOG_TIMEOUT_S 300
 
@@ -291,6 +292,7 @@ for( int Num = 1; Num < NUMBER_OF_STATION; Num++)
 {
   if((Firebase_Primary_Set[Num] == E_NOT_OK) && (modbusStatus[Num] == E_OK) && (HMI_Start[Num] == 1))
   { 
+    ScanDevice = 1;
     esp_task_wdt_reset();
     // Lựa chọn sử dụng DataBase Primary
       data_Firebase = arrayToString(TimeProcessed[Num], NUMBER_OF_DATA_ON_FIREBASE);
@@ -339,6 +341,7 @@ for( int Num = 1; Num < NUMBER_OF_STATION; Num++)
 {
   if((Firebase_Backup_Set[Num] == E_NOT_OK) && (modbusStatus[Num] == E_OK)&& (HMI_Start[Num] == 1))
   {
+    ScanDevice = 1;
     esp_task_wdt_reset();
     data_Firebase = arrayToString(TimeProcessed[Num], NUMBER_OF_DATA_ON_FIREBASE);
     if (Firebase.setString(firebaseDataBackup, stationStatusPath.c_str() + StationName[Num] , data_Firebase.c_str()))
@@ -375,9 +378,18 @@ for( int Num = 1; Num < NUMBER_OF_STATION; Num++)
   }
   delay(100); 
 }
-
+  if((timeValue - TimeScanDevice) > 5)
+  {
+    ScanDevice = 1;
+    TimeScanDevice = timeValue;
+  }
   ScanIP();
-  ScanConnectStatus();
+  if(ScanDevice == 1)
+  {
+    ScanConnectStatus();
+    ScanDevice = 0;
+  }
+
   // Serial.println("StationConnectStatus:");
   // for(int index = 0; index < NUMBER_OF_STATION; index++)
   // {
