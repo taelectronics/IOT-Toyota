@@ -86,18 +86,23 @@ static int DayOfWeekToday;
 static uint16_t TimeProcessed[NUMBER_OF_STATION][NUMBER_OF_DATA_ON_FIREBASE];
 static uint16_t TimeCompare[NUMBER_OF_STATION][NUMBER_OF_DATA_ON_FIREBASE];
 static uint16_t IPNumberArray[NUMBER_OF_STATION*4];
+static uint16_t TimeNowArray[NUMBER_OF_STATION];
 static uint16_t SettingParametter[80];
 static uint16_t StationStatus[NUMBER_OF_STATION];
+static volatile uint16_t StationConnectStatus[NUMBER_OF_STATION];
 String GetJsonIP[NUMBER_OF_STATION*2];
+String GetJsonTimeNow[NUMBER_OF_STATION*2];
 String JsonIPFirebase;
+String JsonTimeNowFirebase;
 static byte CountNumber = 0;
 int LCDCount = 0;
 String StationName[NUMBER_OF_STATION] = {"S00", "S01", "S02", "S03", "S04", "S05", "S06", "S07", "S08", "S09", "S10", "S11", "S12", "S13", "S14", "S15", "S16", "S17", "S18", "S19", "S20", "S21", "S22", "S23", "S24"};
-String FirmwareVer = "10.8.2.14";
+String FirmwareVer = "13.8.1.27";
 byte Firebase_Primary_Set[NUMBER_OF_STATION] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
 byte Firebase_Backup_Set[NUMBER_OF_STATION] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
 String stationStatusPath = "/Station/Status/";
 String stationIPPath = "/Station/IP/";
+String stationTimeNowPath = "/Station/Time/";
 String stationDayofWeekPath = "/Station/DayofWeek";
 String ROMData = "";
 String data_Firebase;
@@ -136,6 +141,8 @@ bool checkArray(uint16_t arr[], uint16_t a);
 int getDayOfWeek(int day, int month, int year);
 String getJsonFromFirebase(const String& path);
 void extractQuotedStrings(const String& input, String output[]);
+void ScanIP();
+void ScanConnectStatus();
 void setup() {
   Serial.begin(115200);
   delay(10);
@@ -178,13 +185,11 @@ void setup() {
     // Cấu hình máy chủ NTP
   pinMode(E_STOP_BUTTON, INPUT_PULLUP);
   configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
-  if(digitalRead(E_STOP_BUTTON)==HIGH)
-  {
     if (FirmwareVersionCheck()) 
     {
       firmwareUpdate();
     }
-  }
+
 
   // Khởi tạo watchdog
   esp_task_wdt_init(WATCHDOG_TIMEOUT_S, true);
@@ -335,94 +340,55 @@ for( int Num = 1; Num < NUMBER_OF_STATION; Num++)
   if((Firebase_Backup_Set[Num] == E_NOT_OK) && (modbusStatus[Num] == E_OK)&& (HMI_Start[Num] == 1))
   {
     esp_task_wdt_reset();
-    // if (Firebase.ready())
-    // {
-      data_Firebase = arrayToString(TimeProcessed[Num], NUMBER_OF_DATA_ON_FIREBASE);
-      if (Firebase.setString(firebaseDataBackup, stationStatusPath.c_str() + StationName[Num] , data_Firebase.c_str()))
-      {
-        lcd.setCursor(0,0);
-        lcd.print("BAK "); lcd.print(Num);
-        lcd.print(": OK            ");
-        Serial.print("Write Successfully to The Backup Firebase: ");
-        Serial.println(Num);
-        Firebase_Backup_Set[Num] = E_OK;
-      }
-      else
-      {
-        lcd.setCursor(0,0);
-        lcd.print("BAK "); lcd.print(Num);
-        lcd.print(": ERROR        ");
-        Firebase_Backup_Set[Num] = E_NOT_OK;
-        Serial.print("Failed to Write Backup Firebase: "); Serial.println(Num);
-        Serial.println(firebaseDataBackup.errorReason());
-        if (WiFi.status() != WL_CONNECTED)
-        {
-          lcd.setCursor(0,0);
-          lcd.print("Wifi isn't contected"); 
-          Serial.println("Wifi isn't contected");
-          WiFi.reconnect();
-          delay(1000);
-        }
-        else
-        {
-          WifiStatus = E_OK;
-        }
-      }
-      Serial.println(data_Firebase);
-    }
-  delay(100); 
-}
-
-if(TimeProcessed[1][28] == 3)
-{
-  Firebase.begin(&firebaseConfigPrimary, &firebaseAuthPrimary);
-  JsonIPFirebase = getJsonFromFirebase(stationIPPath);
-  if (JsonIPFirebase.length() > 0) 
-  {
-    Serial.println("Received JSON:");
-    Serial.println(JsonIPFirebase);
-    extractQuotedStrings(JsonIPFirebase, GetJsonIP);
-    for(int i = 0; i < (NUMBER_OF_STATION * 2 - 1); i++)
+    data_Firebase = arrayToString(TimeProcessed[Num], NUMBER_OF_DATA_ON_FIREBASE);
+    if (Firebase.setString(firebaseDataBackup, stationStatusPath.c_str() + StationName[Num] , data_Firebase.c_str()))
     {
-      for(int y = 0; y < NUMBER_OF_STATION; y++)
-      {
-        if(GetJsonIP[i] == StationName[y])
-        {
-          Serial.print(y);
-          Serial.print(":");
-          // Serial.println(GetJsonIP[i+1]);
-          parseIP(GetJsonIP[i+1], IPNumber);
-          for(int x = 0; x<4; x++)
-          {
-            IPNumberArray[y*4+x] = IPNumber[x];
-            Serial.print(IPNumberArray[y*4+x]);
-            Serial.print(".");
-          }
-          Serial.println();
-        }
-      }
-    }
-
-    if(WriteIPAddressToHMI(600, NUMBER_OF_STATION*4, IPNumberArray))
-    {
-      Serial.println("Write IP Successfully");
+      lcd.setCursor(0,0);
+      lcd.print("BAK "); lcd.print(Num);
+      lcd.print(": OK            ");
+      Serial.print("Write Successfully to The Backup Firebase: ");
+      Serial.println(Num);
+      Firebase_Backup_Set[Num] = E_OK;
     }
     else
     {
-      Serial.println("Fail to Write IP");
+      lcd.setCursor(0,0);
+      lcd.print("BAK "); lcd.print(Num);
+      lcd.print(": ERROR        ");
+      Firebase_Backup_Set[Num] = E_NOT_OK;
+      Serial.print("Failed to Write Backup Firebase: "); Serial.println(Num);
+      Serial.println(firebaseDataBackup.errorReason());
+      if (WiFi.status() != WL_CONNECTED)
+      {
+        lcd.setCursor(0,0);
+        lcd.print("Wifi isn't contected"); 
+        Serial.println("Wifi isn't contected");
+        WiFi.reconnect();
+        delay(1000);
+      }
+      else
+      {
+        WifiStatus = E_OK;
+      }
     }
-  } 
-  else 
-  {
-      Serial.println("Failed to get JSON from Firebase");
+    Serial.println(data_Firebase);
   }
+  delay(100); 
 }
 
-
+  ScanIP();
+  ScanConnectStatus();
+  // Serial.println("StationConnectStatus:");
+  // for(int index = 0; index < NUMBER_OF_STATION; index++)
+  // {
+  //   Serial.print(StationConnectStatus[index]);
+  //   Serial.print(" ");
+  // }
+  // Serial.println();
   DayOfWeekToday = getDayOfWeek(dayGet, monthGet, yearGet);
   for (int Index = 1; Index < NUMBER_OF_STATION; Index++)
   {
-    if((true == checkArray(TimeProcessed[Index], timeValue)) && (TimeProcessed[Index][20 + DayOfWeekToday]))
+    if((true == checkArray(TimeProcessed[Index], timeValue)) && (TimeProcessed[Index][20 + DayOfWeekToday]) && (StationConnectStatus[Index] == 1))
     {
       StationStatus[Index] = 1;
     }
@@ -443,7 +409,7 @@ if(TimeProcessed[1][28] == 3)
   {
     Serial.println("Fail to Write Station Status ");
   }
-
+  Serial.println();
   delay(1000);
 }
 
@@ -1112,4 +1078,97 @@ String getJsonFromFirebase(const String& path) {
         Serial.println(firebaseDataPrimary.errorReason());
         return "";
     }
+}
+
+void ScanIP()
+{
+  if(TimeProcessed[1][28] == 3)
+  {
+    Firebase.begin(&firebaseConfigPrimary, &firebaseAuthPrimary);
+    JsonIPFirebase = getJsonFromFirebase(stationIPPath);
+    if (JsonIPFirebase.length() > 0) 
+    {
+      Serial.println("Received IP JSON:");
+      Serial.println(JsonIPFirebase);
+      extractQuotedStrings(JsonIPFirebase, GetJsonIP);
+      for(int i = 0; i < (NUMBER_OF_STATION * 2 - 1); i++)
+      {
+        for(int y = 0; y < NUMBER_OF_STATION; y++)
+        {
+          if(GetJsonIP[i] == StationName[y])
+          {
+            Serial.print(y);
+            Serial.print(":");
+            // Serial.println(GetJsonIP[i+1]);
+            parseIP(GetJsonIP[i+1], IPNumber);
+            for(int x = 0; x<4; x++)
+            {
+              IPNumberArray[y*4+x] = IPNumber[x];
+              Serial.print(IPNumberArray[y*4+x]);
+              Serial.print(".");
+            }
+            Serial.println();
+          }
+        }
+      }
+
+      if(WriteIPAddressToHMI(600, NUMBER_OF_STATION*4, IPNumberArray))
+      {
+        Serial.println("Write IP Successfully");
+      }
+      else
+      {
+        Serial.println("Fail to Write IP");
+      }
+    } 
+    else 
+    {
+        Serial.println("Failed to get IP JSON from Firebase");
+    }
+  }
+}
+
+void ScanConnectStatus()
+{
+
+    Firebase.begin(&firebaseConfigPrimary, &firebaseAuthPrimary);
+    JsonTimeNowFirebase = getJsonFromFirebase(stationTimeNowPath);
+    if (JsonTimeNowFirebase.length() > 0) 
+    {
+      Serial.println("Received Time JSON:");
+      Serial.println(JsonTimeNowFirebase);
+      extractQuotedStrings(JsonTimeNowFirebase, GetJsonTimeNow);
+      for(int i = 0; i < (NUMBER_OF_STATION * 2 - 1); i++)
+      {
+        for(int y = 0; y < NUMBER_OF_STATION; y++)
+        {
+          if(GetJsonTimeNow[i] == StationName[y])
+          {
+            uint16_t TimeGetFromFirebase = 0;
+            if(GetJsonTimeNow[i+1] != "")
+            {
+              uint16_t TimeGetFromFirebase = (uint16_t)GetJsonTimeNow[i+1].toInt();
+              int TimeDifferrent = (int)timeValue - (int)TimeGetFromFirebase;
+              if((TimeDifferrent < 5) && ( TimeDifferrent > -5))
+              {
+                StationConnectStatus[y] = 1;
+              }
+              else
+              {
+                StationConnectStatus[y] = 0;  
+              }
+            }
+            else
+            {
+              StationConnectStatus[y] = 0;
+            }
+          }
+        }
+      } 
+    }
+    else 
+    {
+        Serial.println("Failed to get TIMENOW JSON from Firebase");
+    }
+
 }

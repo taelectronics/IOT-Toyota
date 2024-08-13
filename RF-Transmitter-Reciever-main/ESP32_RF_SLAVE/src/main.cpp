@@ -82,24 +82,28 @@ volatile byte WifiStatus = E_NOT_OK;
 volatile byte ModbusStatus = E_NOT_OK;
 int timeValue;
 int LCDCount = 0;
-String FirmwareVer = "10.8.2.14";
+String FirmwareVer = "13.8.1.27";
 volatile uint8_t Status[NUMBER_OF_STATION] = {0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 volatile int hourSetRTC, minSetRTC, secSetRTC, daySetRTC, monthSetRTC, yearSetRTC;
 uint16_t TimeGet[NUMBER_OF_DATA];
 volatile byte DayStatus = E_NOT_OK;
 volatile byte SendIP = E_NOT_OK;
 String IPPath = "/Station/IP/";
+String TimePath = "/Station/Time/";
 String stationPath = "/Station/Status/";
 String StationName[NUMBER_OF_STATION] = {"S00", "S01", "S02", "S03", "S04", "S05", "S06", "S07", "S08", "S09", "S10", "S11", "S12", "S13", "S14", "S15", "S16", "S17", "S18", "S19","S20", "S21","S22", "S23", "S24"};
 String ROMData = "";
 String data_Firebase_Compare;
 byte Primary_Get = E_NOT_OK;
 byte Backup_Get = E_NOT_OK;
+byte Primary_Set = E_NOT_OK;
 byte SetTimeRTC = E_NOT_OK;
 volatile byte RunMode = AUTO_MODE; // 0 là Auto, 1 là Manual
 volatile byte QuickUpdate;
 volatile byte EmergencyStop = 0;
 volatile int displayMode = 0;
+volatile int NumberOfMinuteCompare = 0;
+volatile int NumberOfMinuteNow = 0;
 void firmwareUpdate();
 int FirmwareVersionCheck(void);
 void writeStringToROM(String myString);
@@ -129,6 +133,7 @@ bool compareStrings(String str1, String str2);
 void updateTime(int hour, int minute, int second, int day, int month, int year);
 void processDataInRom();
 int getDayOfWeek(int day, int month, int year);
+byte RTCStatus = 1;
 int hourRTC = 0; 
 int minRTC = 0;
 int secRTC = 0;
@@ -184,7 +189,8 @@ void setup()
   Firebase.begin(&firebaseConfigPrimary, &firebaseAuthPrimary);
   Firebase.reconnectWiFi(true);
   // Kiểm tra kết nối Firebase
-  if (Firebase.ready()) {
+  if (Firebase.ready()) 
+  {
     Serial.println("Connected to Primary Firebase");
   } 
   else 
@@ -204,13 +210,11 @@ void setup()
   }
 
   // Serial.println(FirmwareVer);
-  if(digitalRead(QUICK_UPDATE)==LOW)
-  {
+
     if (FirmwareVersionCheck()) 
     {
     firmwareUpdate();
     }
-  }
   // Cấu hình máy chủ NTP
   configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
   DisplayLCD();
@@ -229,7 +233,12 @@ void loop()
 {
   LCDCount++;
   DisplayLCD();
-  if(LCDCount > 1000)
+  if(RTCStatus == 0)
+  {
+    lcd.setCursor(0,0);
+    lcd.print("RTC not Running    ");
+  }
+  if(LCDCount > 100)
   {
     lcd.clear();
     lcd.getWriteError();
@@ -265,7 +274,7 @@ void loop()
       SetTimeRTC = E_OK;
     }
   }
-  if((digitalRead(QUICK_UPDATE)==LOW) || (RunMode == MANUAL_MODE) || (EmergencyStop == 1))
+  if((digitalRead(QUICK_UPDATE) == LOW) || (RunMode == MANUAL_MODE) || (EmergencyStop == 1))
   {
     QuickUpdate = 1;
   }
@@ -278,50 +287,46 @@ void loop()
   esp_task_wdt_reset();
 
   SettingbySoftware();
+  if((NumberOfMinuteNow - NumberOfMinuteCompare) >= 2)
+  {
+    Primary_Set = E_NOT_OK;
+    NumberOfMinuteCompare = NumberOfMinuteNow;
+  }
   // Lựa chọn sử dụng DataBase Primary
   if(((Primary_Get == E_NOT_OK) && (digitalRead(SELECT_FIREBASE) == HIGH) ) || (QuickUpdate == 1))
   {
     Firebase.begin(&firebaseConfigPrimary, &firebaseAuthPrimary);
-    if (Firebase.ready())
+    if (getFirebaseData(firebaseDataPrimary, data_Firebase, stationPath.c_str() + StationName[StationValue])) 
     {
-      if (getFirebaseData(firebaseDataPrimary, data_Firebase, stationPath.c_str() + StationName[StationValue])) 
+      Serial.println("Get Primary Firebase successful");
+      Serial.println("Data: " + data_Firebase);
+      stringToArray(data_Firebase, TimeGet, NUMBER_OF_DATA);
+      Serial.println();
+      if(compareStrings(data_Firebase_Compare,data_Firebase) == false)
       {
-        Serial.println("Get Primary Firebase successful");
-        Serial.println("Data: " + data_Firebase);
-        stringToArray(data_Firebase, TimeGet, NUMBER_OF_DATA);
-        Serial.println();
-        if(compareStrings(data_Firebase_Compare,data_Firebase) == false)
-        {
-          writeArrayToEEPROM(0,TimeGet,NUMBER_OF_DATA);
-          lcd.setCursor(0,0);
-          lcd.print("Saved to ROM      ");
-          Serial.println("Saved to ROM");
-          processDataInRom();
-        }
-        else
-        {
-          lcd.setCursor(0,0);
-          lcd.print("Nothing's change      ");
-          Serial.println("Nothing's change");
-        }
-
-        data_Firebase_Compare = data_Firebase;
-        Primary_Get = E_OK;
-        delay(1000);
-      } 
-      else 
-      {
-        lcd.print("Primary FB Fail     ");
-        Serial.println("Failed to get data from Primary");
-        Primary_Get = E_NOT_OK;
-        delay(1000);
+        writeArrayToEEPROM(0,TimeGet,NUMBER_OF_DATA);
+        lcd.setCursor(0,0);
+        lcd.print("Saved to ROM      ");
+        Serial.println("Saved to ROM");
+        processDataInRom();
       }
-    WifiStatus = E_OK;
-    }
-    else
+      else
+      {
+        lcd.setCursor(0,0);
+        lcd.print("Nothing's change      ");
+        Serial.println("Nothing's change");
+      }
+
+      data_Firebase_Compare = data_Firebase;
+      Primary_Get = E_OK;
+      WifiStatus = E_OK;
+      delay(1000);
+    } 
+    else 
     {
+      lcd.print("Primary FB Fail     ");
+      Serial.println("Failed to get data from Primary");
       Primary_Get = E_NOT_OK;
-      Serial.println("Firebase is not ready");
       if (WiFi.status() != WL_CONNECTED)
       {
         lcd.setCursor(0,0);
@@ -338,49 +343,40 @@ void loop()
   if(((Primary_Get == E_NOT_OK) || (digitalRead(SELECT_FIREBASE)==LOW))&&(Backup_Get == E_NOT_OK))
   {
     Firebase.begin(&firebaseConfigBackup, &firebaseAuthBackup);
-    if (Firebase.ready())
+    if (getFirebaseData(firebaseDataBackup, data_Firebase, stationPath.c_str() + StationName[StationValue])) 
     {
-      if (getFirebaseData(firebaseDataBackup, data_Firebase, stationPath.c_str() + StationName[StationValue])) 
+      Serial.println("Get Backup Firebase successful");
+      Serial.println("Data: " + data_Firebase);
+      stringToArray(data_Firebase, TimeGet, NUMBER_OF_DATA);
+      if(compareStrings(data_Firebase_Compare,data_Firebase) == false)
       {
-        Serial.println("Get Backup Firebase successful");
-        Serial.println("Data: " + data_Firebase);
-        stringToArray(data_Firebase, TimeGet, NUMBER_OF_DATA);
-        if(compareStrings(data_Firebase_Compare,data_Firebase) == false)
-        {
-          writeArrayToEEPROM(0,TimeGet, NUMBER_OF_DATA);
-          lcd.setCursor(0,0);
-          lcd.print("Saved to ROM     ");
-          Serial.println("Saved to ROM");
-          processDataInRom();
-        }
-        else
-        {
-          lcd.setCursor(0,0);
-          lcd.print("Nothing's change     ");
-          Serial.println("Nothing's change");
-        }
-        data_Firebase_Compare = data_Firebase;
-        Backup_Get = E_OK;
-        delay(1000);
-      } 
-      else 
+        writeArrayToEEPROM(0,TimeGet, NUMBER_OF_DATA);
+        lcd.setCursor(0,0);
+        lcd.print("Saved to ROM     ");
+        Serial.println("Saved to ROM");
+        processDataInRom();
+      }
+      else
       {
         lcd.setCursor(0,0);
-        lcd.print("Backup FB Fail     ");
-        Serial.println("Failed to get data from Backup");
-        Backup_Get = E_NOT_OK;
-        delay(1000);
+        lcd.print("Nothing's change     ");
+        Serial.println("Nothing's change");
       }
+      data_Firebase_Compare = data_Firebase;
+      Backup_Get = E_OK;
       WifiStatus = E_OK;
+      delay(1000);
     } 
-    else
+    else 
     {
+      lcd.setCursor(0,0);
+      lcd.print("Backup FB Fail     ");
+      Serial.println("Failed to get data from Backup");
       Backup_Get = E_NOT_OK;
-      Serial.println("Firebase is not ready");
       if (WiFi.status() != WL_CONNECTED)
       {
-          lcd.setCursor(0,0);
-          lcd.print("No Internet     ");
+        lcd.setCursor(0,0);
+        lcd.print("No Internet     ");
         Serial.println("Wifi isn't contected");
         WiFi.reconnect();
       }
@@ -388,7 +384,21 @@ void loop()
       delay(1000);
     }
   }
-    delay(1000);
+  if((Primary_Get == E_OK) && (Primary_Set == E_NOT_OK))
+  {
+    if (Firebase.setString(firebaseDataPrimary, TimePath.c_str() + StationName[StationValue], String(NumberOfMinuteNow)))
+    {
+      Serial.println("Finished to write NumberOfMinuteNow");
+      Primary_Set = E_OK;
+    }
+    else
+    {
+      Serial.println("Fail to write NumberOfMinuteNow");
+      Serial.println(firebaseDataPrimary.errorReason());
+      Primary_Set = E_NOT_OK;
+    }
+  }
+  delay(1000);
 }
 
 void firmwareUpdate(void) 
@@ -647,6 +657,13 @@ void printLocalTime() {
     Serial.println("Failed to obtain time");
     return;
   }
+  Serial.println("Get time from Internet");
+  minRTC = timeinfo.tm_min;
+  hourRTC = timeinfo.tm_hour;
+  secRTC = timeinfo.tm_sec;
+  dayRTC = timeinfo.tm_mday;
+  monthRTC = timeinfo.tm_mon;
+  yeadRTC = timeinfo.tm_year;
   timeValue= timeinfo.tm_hour*60 + timeinfo.tm_min;
 }
 
@@ -964,12 +981,28 @@ void ProcessRTC()
 {
   DateTime now = rtc.now();
   uint16_t timeValueRTC;
-  minRTC = now.minute();
-  hourRTC = now.hour();
-  secRTC = now.second();
-  dayRTC = now.day();
-  monthRTC = now.month();
-  yeadRTC = now.year();
+  // Serial.print("yearRTC:"); Serial.println(now.year());
+  // Serial.print("monthRTC:"); Serial.println(now.month());
+  // Serial.print("dayRTC:"); Serial.println(now.day());
+  // Serial.print("hourRTC:"); Serial.println(now.hour());
+  // Serial.print("minuteRTC:"); Serial.println(now.minute());
+  // Serial.print("minuteRTC:"); Serial.println(now.second());
+  if((now.day() < 32) && (now.month() < 13) && (now.year() > 2023) && (now.hour() < 25) && (now.minute() < 61) && (now.second() < 61))
+  {
+    minRTC = now.minute();
+    hourRTC = now.hour();
+    secRTC = now.second();
+    dayRTC = now.day();
+    monthRTC = now.month();
+    yeadRTC = now.year();
+    RTCStatus = 1;
+  }
+  else
+  {
+    RTCStatus = 0;
+    printLocalTime();
+  }
+  NumberOfMinuteNow = hourRTC*60+minRTC;
   if(minCompare != minRTC)
   {
     Primary_Get = E_NOT_OK;
