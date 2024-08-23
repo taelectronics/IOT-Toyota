@@ -82,7 +82,7 @@ volatile byte WifiStatus = E_NOT_OK;
 volatile byte ModbusStatus = E_NOT_OK;
 int timeValue;
 int LCDCount = 0;
-String FirmwareVer = "13.8.1.27";
+String FirmwareVer = "23.8.2.54";
 volatile uint8_t Status[NUMBER_OF_STATION] = {0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 volatile int hourSetRTC, minSetRTC, secSetRTC, daySetRTC, monthSetRTC, yearSetRTC;
 uint16_t TimeGet[NUMBER_OF_DATA];
@@ -384,7 +384,7 @@ void loop()
       delay(1000);
     }
   }
-  if((Primary_Get == E_OK) && (Primary_Set == E_NOT_OK))
+  if(Primary_Set == E_NOT_OK)
   {
     if (Firebase.setString(firebaseDataPrimary, TimePath.c_str() + StationName[StationValue], String(NumberOfMinuteNow)))
     {

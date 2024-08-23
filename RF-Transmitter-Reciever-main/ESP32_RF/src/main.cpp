@@ -98,7 +98,7 @@ String JsonTimeNowFirebase;
 static byte CountNumber = 0;
 int LCDCount = 0;
 String StationName[NUMBER_OF_STATION] = {"S00", "S01", "S02", "S03", "S04", "S05", "S06", "S07", "S08", "S09", "S10", "S11", "S12", "S13", "S14", "S15", "S16", "S17", "S18", "S19", "S20", "S21", "S22", "S23", "S24"};
-String FirmwareVer = "13.8.1.27";
+String FirmwareVer = "3.8.2.54";
 byte Firebase_Primary_Set[NUMBER_OF_STATION] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
 byte Firebase_Backup_Set[NUMBER_OF_STATION] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
 String stationStatusPath = "/Station/Status/";
@@ -378,7 +378,7 @@ for( int Num = 1; Num < NUMBER_OF_STATION; Num++)
   }
   delay(100); 
 }
-  if((timeValue - TimeScanDevice) > 5)
+  if((timeValue - TimeScanDevice) > StationValue)
   {
     ScanDevice = 1;
     TimeScanDevice = timeValue;
@@ -1161,7 +1161,7 @@ void ScanConnectStatus()
             {
               uint16_t TimeGetFromFirebase = (uint16_t)GetJsonTimeNow[i+1].toInt();
               int TimeDifferrent = (int)timeValue - (int)TimeGetFromFirebase;
-              if((TimeDifferrent < 5) && ( TimeDifferrent > -5))
+              if((TimeDifferrent < 4) && ( TimeDifferrent > -4))
               {
                 StationConnectStatus[y] = 1;
               }
