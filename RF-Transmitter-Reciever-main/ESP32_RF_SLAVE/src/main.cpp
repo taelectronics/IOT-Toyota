@@ -82,7 +82,7 @@ volatile byte WifiStatus = E_NOT_OK;
 volatile byte ModbusStatus = E_NOT_OK;
 int timeValue;
 int LCDCount = 0;
-String FirmwareVer = "3.8.2.54";
+String FirmwareVer = "5.9.10.14";
 volatile uint8_t Status[NUMBER_OF_STATION] = {0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 volatile int hourSetRTC, minSetRTC, secSetRTC, daySetRTC, monthSetRTC, yearSetRTC;
 uint16_t TimeGet[NUMBER_OF_DATA];
@@ -287,11 +287,11 @@ void loop()
   esp_task_wdt_reset();
 
   SettingbySoftware();
-  if((NumberOfMinuteNow - NumberOfMinuteCompare) >= 2)
-  {
-    Primary_Set = E_NOT_OK;
-    NumberOfMinuteCompare = NumberOfMinuteNow;
-  }
+  // if((NumberOfMinuteNow - NumberOfMinuteCompare) >= 2)
+  // {
+  //   Primary_Set = E_NOT_OK;
+  //   NumberOfMinuteCompare = NumberOfMinuteNow;
+  // }
   // Lựa chọn sử dụng DataBase Primary
   if(((Primary_Get == E_NOT_OK) && (digitalRead(SELECT_FIREBASE) == HIGH) ) || (QuickUpdate == 1))
   {
@@ -1007,6 +1007,7 @@ void ProcessRTC()
   {
     Primary_Get = E_NOT_OK;
     Backup_Get = E_NOT_OK;
+    Primary_Set = E_NOT_OK;
     minCompare = minRTC;
   }
   timeValueRTC = (uint16_t)hourRTC * 60 + (uint16_t)minRTC;
