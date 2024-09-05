@@ -98,7 +98,7 @@ String JsonTimeNowFirebase;
 static byte CountNumber = 0;
 int LCDCount = 0;
 String StationName[NUMBER_OF_STATION] = {"S00", "S01", "S02", "S03", "S04", "S05", "S06", "S07", "S08", "S09", "S10", "S11", "S12", "S13", "S14", "S15", "S16", "S17", "S18", "S19", "S20", "S21", "S22", "S23", "S24"};
-String FirmwareVer = "5.9.10.14";
+String FirmwareVer = "9.5.11.27";
 byte Firebase_Primary_Set[NUMBER_OF_STATION] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
 byte Firebase_Backup_Set[NUMBER_OF_STATION] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
 String stationStatusPath = "/Station/Status/";
@@ -153,6 +153,7 @@ void setup() {
   lcd.setCursor(0,0);
   lcd.print("V:");
   lcd.print(FirmwareVer);
+  delay(2000);
   Serial.print("V:"); Serial.println(FirmwareVer);
   // Đọc chuỗi từ ROM và hiển thị lên Serial
   ReadFromRom();
@@ -189,6 +190,12 @@ void setup() {
     if (FirmwareVersionCheck()) 
     {
       firmwareUpdate();
+    }
+    else
+    {
+      lcd.setCursor(0,0);
+      lcd.print("Fail to get version");
+      delay(2000);
     }
 
 

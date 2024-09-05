@@ -82,7 +82,7 @@ volatile byte WifiStatus = E_NOT_OK;
 volatile byte ModbusStatus = E_NOT_OK;
 int timeValue;
 int LCDCount = 0;
-String FirmwareVer = "5.9.10.14";
+String FirmwareVer = "9.5.11.27";
 volatile uint8_t Status[NUMBER_OF_STATION] = {0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 volatile int hourSetRTC, minSetRTC, secSetRTC, daySetRTC, monthSetRTC, yearSetRTC;
 uint16_t TimeGet[NUMBER_OF_DATA];
@@ -173,7 +173,7 @@ void setup()
   lcd.print("V: ");lcd.print(FirmwareVer);
   lcd.setCursor(0, 1);
   lcd.print("Wifi: "); lcd.print(wifi_ssid);
-  delay(1000);
+  delay(2000);
   // Đọc chuỗi từ ROM và hiển thị lên Serial
   ReadFromRom();
 
@@ -214,6 +214,12 @@ void setup()
     if (FirmwareVersionCheck()) 
     {
     firmwareUpdate();
+    }
+    else
+    {
+      lcd.setCursor(0,0);
+      lcd.print("Fail to get version");
+      delay(2000);
     }
   // Cấu hình máy chủ NTP
   configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
