@@ -61,6 +61,7 @@ Preferences preferences;
 #define NUMBER_OF_STATION 25
 #define NUMBER_OF_DATA 30
 #define AUTO_MODE 0
+
 #define MANUAL_MODE 1
 // Khởi tạo Firebase
 FirebaseData firebaseDataPrimary;
